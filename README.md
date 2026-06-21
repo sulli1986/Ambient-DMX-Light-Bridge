@@ -6,6 +6,10 @@ Built for live worship environments but works with any video source and any Ligh
 
 ![Ambient DMX Bridge UI](docs/screenshot.png)
 
+## See It In Action
+
+[![Watch the demo](https://img.youtube.com/vi/rK9TPhdsEx4/0.jpg)](https://youtube.com/shorts/rK9TPhdsEx4)
+
 ---
 
 ## How It Works
