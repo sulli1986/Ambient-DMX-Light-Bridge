@@ -1,10 +1,10 @@
-# Ambient DMX Bridge
+# Pixel Mapping to OSC
 
 A real-time screen-to-light colour bridge. Captures a video output screen (e.g. ProPresenter), samples colour zones across the frame, and drives DMX fixtures via Lightkey OSC — making your PAR cans look like an extension of the screen.
 
 Built for live worship environments but works with any video source and any Lightkey-controlled DMX rig.
 
-![Ambient DMX Bridge UI](screenshot.jpeg)
+![Pixel Mapping to OSC UI](screenshot.jpeg)
 
 ## See It In Action
 
@@ -47,8 +47,8 @@ Each fixture is assigned a **zone** — a rectangular region of the video frame.
 Click **Code > Download ZIP** on this page, or clone:
 
 ```bash
-git clone https://github.com/yourusername/ambient-dmx-bridge.git
-cd ambient-dmx-bridge
+git clone https://github.com/yourusername/pixel-mapping-to-osc.git
+cd pixel-mapping-to-osc
 ```
 
 ### 2. Install dependencies
@@ -359,7 +359,7 @@ The bridge is tuned to keep colours vivid and avoid washing out to white:
 ## Project Structure
 
 ```
-ambient-dmx-bridge/
+pixel-mapping-to-osc/
 ├── app.py                  # Flask server + bridge engine
 ├── config.json             # Your saved configuration (gitignored)
 ├── config.example.json     # Example configuration to copy (fixtures + bars)

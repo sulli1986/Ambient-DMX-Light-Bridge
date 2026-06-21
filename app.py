@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Ambient DMX Bridge
+Pixel Mapping to OSC
 =============================
 Reads a screen/monitor, samples colour zones, sends RGBW/RGBA/RGB/RGBWW/RGBAW
 values to Lightkey via OSC in real time.
@@ -20,7 +20,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
-log = logging.getLogger("ambient-dmx")
+log = logging.getLogger("pixel-mapping-osc")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 CONFIG_FILE = Path("config.json")
@@ -979,7 +979,7 @@ def api_static_send():
 if __name__ == "__main__":
     import webbrowser
     print("\n" + "="*50)
-    print("  Ambient DMX Bridge")
+    print("  Pixel Mapping to OSC")
     print("  Open: http://localhost:5000")
     print("="*50 + "\n")
     # Open browser after short delay
