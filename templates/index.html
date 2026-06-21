@@ -434,6 +434,9 @@
           <button class="btn btn-red" id="stop-btn" onclick="stopBridge()" style="display:none">■ Stop</button>
           <button class="btn" id="toggle-btn" onclick="toggleBridge()" style="display:none">⏸ Pause</button>
         </div>
+        <div id="fog-row" style="display:none;margin-top:8px">
+          <button class="btn" id="fog-btn" onclick="toggleFog()" style="width:100%;justify-content:center;padding:10px">Fog Off</button>
+        </div>
       </div>
     </div>
 
@@ -527,6 +530,7 @@
     <div class="tabs">
       <div class="tab active" onclick="switchTab('fixtures')">Fixtures</div>
       <div class="tab" onclick="switchTab('bars')">Light Bars</div>
+      <div class="tab" onclick="switchTab('static')">Static Controls</div>
       <div class="tab" onclick="switchTab('zones')">Zone Editor</div>
       <div class="tab" onclick="switchTab('test')">Test</div>
     </div>
@@ -674,6 +678,85 @@
       </div>
     </div>
 
+    <!-- STATIC CONTROLS TAB -->
+    <div class="tab-content" id="tab-static">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/>
+              <circle cx="9" cy="6" r="2" fill="var(--surface)"/><circle cx="15" cy="12" r="2" fill="var(--surface)"/><circle cx="9" cy="18" r="2" fill="var(--surface)"/>
+            </svg>
+            Static Controls
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="showAddStatic()">+ Add Control</button>
+        </div>
+        <div class="panel-body">
+
+          <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+            Send constant values to a Lightkey fixture — useful for hazers, fog machines, or any
+            output that needs a fixed level independent of screen content. Sliders update Lightkey live.
+            Values are also sent continuously while the bridge is running.
+          </div>
+
+          <div class="fixture-list" id="static-control-list"></div>
+
+          <!-- ADD STATIC FORM -->
+          <div class="add-fixture-form" id="add-static-form" style="display:none">
+            <div class="section-title" style="margin-bottom:12px">New Static Control</div>
+            <div class="field-row">
+              <div class="field">
+                <label>Fixture Name (Lightkey short name)</label>
+                <input type="text" id="new-static-name" placeholder="e.g. F1">
+              </div>
+              <div class="field">
+                <label>Type</label>
+                <select id="new-static-type" onchange="onStaticTypeChange()">
+                  <option value="dimmer">Single Dimmer</option>
+                  <option value="hazer">Hazer (Fog + Fan)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Single dimmer fields -->
+            <div id="static-dimmer-fields">
+              <div class="field">
+                <label>Initial Value</label>
+                <div class="range-field">
+                  <input type="range" min="0" max="255" value="0" id="new-static-value"
+                    oninput="document.getElementById('new-static-val').textContent=this.value">
+                  <span class="range-val" id="new-static-val">0</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Hazer fields -->
+            <div id="static-hazer-fields" style="display:none">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6;padding:8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+                Open Lightkey, select your hazer fixture, and look at the Design view. The channel names shown there are the property names to enter below — replace spaces with underscores (e.g. "Hazer Output" → <span style="font-family:var(--mono);color:var(--accent)">Hazer_Output</span>).
+              </div>
+              <div class="field-row">
+                <div class="field">
+                  <label>Haze channel property</label>
+                  <input type="text" id="new-static-haze-prop" value="fogAmount" placeholder="e.g. fogAmount">
+                </div>
+                <div class="field">
+                  <label>Fan channel property</label>
+                  <input type="text" id="new-static-fan-prop" value="Fan_Speed" placeholder="e.g. Fan_Speed">
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn btn-primary btn-sm" onclick="addStatic()">Add</button>
+              <button class="btn btn-sm" onclick="hideAddStatic()">Cancel</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
     <!-- ZONE EDITOR TAB -->
     <div class="tab-content" id="tab-zones">
       <div class="panel">
@@ -774,8 +857,10 @@ const fixtureTypes = {{ fixture_types | tojson }};
 // ---- INIT ----
 document.addEventListener('DOMContentLoaded', () => {
   if (!config.bars) config.bars = [];
+  if (!config.static_controls) config.static_controls = [];
   renderFixtures();
   renderBars();
+  renderStaticControls();
   renderZoneFixtureSelect();
   renderIndividualTests();
   startPolling();
@@ -876,6 +961,19 @@ function updateStatus(s) {
     document.getElementById('stop-btn').style.display = 'none';
     document.getElementById('toggle-btn').style.display = 'none';
   }
+
+  // Fog button — only show while bridge is actively running and sending
+  const fogRow = document.getElementById('fog-row');
+  const fogBtn = document.getElementById('fog-btn');
+  if (fogRow && fogBtn) {
+    const showFog = s.running && s.enabled && s.static_count > 0;
+    fogRow.style.display = showFog ? '' : 'none';
+    if (showFog) {
+      fogBtn.textContent = s.fog_enabled ? 'Fog On' : 'Fog Off';
+      fogBtn.className = 'btn ' + (s.fog_enabled ? 'btn-green' : 'btn-red');
+      fogBtn.style.cssText = 'width:100%;justify-content:center;padding:10px';
+    }
+  }
 }
 
 // ---- BRIDGE CONTROLS ----
@@ -901,10 +999,16 @@ async function clearOverrides() {
   toast('All overrides cleared', 'success');
 }
 
+async function toggleFog() {
+  const r = await fetch('/api/fog-toggle', { method: 'POST' });
+  const d = await r.json();
+  toast(d.fog_enabled ? 'Fog on' : 'Fog off', 'success');
+}
+
 // ---- TABS ----
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
-    const tabs = ['fixtures', 'bars', 'zones', 'test'];
+    const tabs = ['fixtures', 'bars', 'static', 'zones', 'test'];
     t.classList.toggle('active', tabs[i] === name);
   });
   document.querySelectorAll('.tab-content').forEach(c => {
@@ -912,6 +1016,7 @@ function switchTab(name) {
   });
   if (name === 'zones') renderZoneCanvas();
   if (name === 'bars') renderBars();
+  if (name === 'static') renderStaticControls();
 }
 
 // ---- CONFIG ----
@@ -1417,6 +1522,128 @@ async function testAll(colour) {
     });
   }
   toast(`Sent ${colour} to all fixtures and bars`, 'success');
+}
+
+// ---- STATIC CONTROLS ----
+function scChannels(sc) {
+  // Normalise to channels array — supports old single-value format
+  return sc.channels || [{ label: 'Dimmer', property: 'dimmer', value: sc.value || 0 }];
+}
+
+function renderStaticControls() {
+  const list = document.getElementById('static-control-list');
+  const controls = config.static_controls || [];
+  if (controls.length === 0) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No static controls added yet</div>';
+    return;
+  }
+  list.innerHTML = controls.map((sc, i) => {
+    const channels = scChannels(sc);
+    const leadValue = channels[0].value;
+    const channelsHtml = channels.map((ch, ci) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-top:${ci > 0 ? '5px' : '6px'}">
+        <div style="width:80px;flex-shrink:0">
+          <div style="font-size:11px;color:var(--muted)">${ch.label}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--border);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${ch.property}">${ch.property}</div>
+        </div>
+        <input type="range" min="0" max="255" value="${ch.value}"
+          oninput="updateStaticValue(${i}, ${ci}, parseInt(this.value))"
+          style="flex:1;accent-color:var(--accent);border:none;background:none;padding:0">
+        <span class="range-val" id="static-val-${i}-${ci}" style="min-width:30px">${ch.value}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--muted);min-width:32px;text-align:right"
+          id="static-pct-${i}-${ci}">${Math.round(ch.value / 255 * 100)}%</span>
+      </div>`).join('');
+    return `
+    <div class="fixture-item" style="grid-template-columns:14px 1fr auto;align-items:start;padding:12px">
+      <div class="fixture-colour-dot" style="margin-top:4px;background:rgba(232,103,58,${(leadValue/255).toFixed(2)});border-color:rgba(232,103,58,0.4)" id="static-dot-${i}"></div>
+      <div style="min-width:0">
+        <div class="fixture-name">${sc.name}</div>
+        ${channelsHtml}
+      </div>
+      <button class="btn btn-sm btn-icon" onclick="removeStatic(${i})" title="Remove" style="align-self:start">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function onStaticTypeChange() {
+  const type = document.getElementById('new-static-type').value;
+  document.getElementById('static-dimmer-fields').style.display = type === 'dimmer' ? '' : 'none';
+  document.getElementById('static-hazer-fields').style.display = type === 'hazer' ? '' : 'none';
+}
+
+function showAddStatic() {
+  document.getElementById('add-static-form').style.display = '';
+  document.getElementById('new-static-name').focus();
+}
+
+function hideAddStatic() {
+  document.getElementById('add-static-form').style.display = 'none';
+}
+
+function addStatic() {
+  const name = document.getElementById('new-static-name').value.trim();
+  const type = document.getElementById('new-static-type').value;
+  if (!name) { toast('Enter a fixture name', 'error'); return; }
+
+  let channels;
+  if (type === 'hazer') {
+    const hazeProp = document.getElementById('new-static-haze-prop').value.trim() || 'fog';
+    const fanProp  = document.getElementById('new-static-fan-prop').value.trim()  || 'Fan_Speed';
+    channels = [
+      { label: 'Haze', property: hazeProp, value: 0 },
+      { label: 'Fan',  property: fanProp,  value: 0 }
+    ];
+  } else {
+    const value = parseInt(document.getElementById('new-static-value').value);
+    channels = [{ label: 'Dimmer', property: 'dimmer', value }];
+  }
+
+  config.static_controls.push({ name, channels });
+  hideAddStatic();
+  document.getElementById('new-static-name').value = '';
+  document.getElementById('new-static-type').value = 'dimmer';
+  onStaticTypeChange();
+  renderStaticControls();
+  markDirty();
+  sendStaticNow(name, channels);
+  toast(`${name} added`, 'success');
+}
+
+function removeStatic(i) {
+  const name = config.static_controls[i].name;
+  config.static_controls.splice(i, 1);
+  renderStaticControls();
+  markDirty();
+  toast(`${name} removed`, 'success');
+}
+
+async function updateStaticValue(i, ci, value) {
+  const channels = scChannels(config.static_controls[i]);
+  channels[ci].value = value;
+  config.static_controls[i].channels = channels;
+
+  const valEl = document.getElementById(`static-val-${i}-${ci}`);
+  const pctEl = document.getElementById(`static-pct-${i}-${ci}`);
+  if (valEl) valEl.textContent = value;
+  if (pctEl) pctEl.textContent = Math.round(value / 255 * 100) + '%';
+
+  if (ci === 0) {
+    const dot = document.getElementById(`static-dot-${i}`);
+    if (dot) dot.style.background = `rgba(232,103,58,${(value/255).toFixed(2)})`;
+  }
+
+  markDirty();
+  await sendStaticNow(config.static_controls[i].name, channels);
+}
+
+async function sendStaticNow(name, channels) {
+  try {
+    await fetch('/api/static-send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, channels })
+    });
+  } catch (e) { /* bridge may not be running */ }
 }
 
 // Redraw canvas on resize

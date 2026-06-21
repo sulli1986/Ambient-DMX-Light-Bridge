@@ -42,7 +42,8 @@ DEFAULT_CONFIG = {
     "min_output": 40,
     "stage_floor_pct": 50,
     "fixtures": [],
-    "bars": []
+    "bars": [],
+    "static_controls": []
 }
 
 # ---------------------------------------------------------------------------
@@ -277,6 +278,19 @@ class LightkeyOSC:
                 pass
         log.info(f"Cleared overrides on {len(fixture_names)} fixtures.")
 
+    def send_static(self, name, channels):
+        """Send constant values for a static control.
+        channels: list of {"property": str, "value": int 0-255}
+        """
+        for ch in channels:
+            try:
+                self.client.send_message(
+                    f"/fixture/{name}/overrides/{ch['property']}",
+                    [ch['value'] / 255.0]
+                )
+            except Exception as e:
+                log.warning(f"OSC static error ({name}/{ch['property']}): {e}")
+
     def test_fixture(self, name, r, g, b, fixture_type):
         channels = rgb_to_channels(r, g, b, fixture_type)
         self.send_fixture(name, channels)
@@ -419,6 +433,7 @@ class BridgeEngine:
     def __init__(self):
         self.running = False
         self.enabled = True
+        self.fog_enabled = True
         self.config = self._load_config()
         self.current_colours = {}
         self.osc = None
@@ -448,6 +463,7 @@ class BridgeEngine:
         if self.running:
             return
         self.running = True
+        self.fog_enabled = True
         self.status = "running"
         self.osc = LightkeyOSC(self.config["lightkey_host"], self.config["lightkey_port"])
         self.capture = ScreenCapture(self.config["monitor"])
@@ -478,6 +494,21 @@ class BridgeEngine:
             self.capture.stop()
         self.osc = None
         log.info("Bridge stopped, overrides cleared.")
+
+    def toggle_fog(self):
+        self.fog_enabled = not self.fog_enabled
+        try:
+            osc = LightkeyOSC(self.config["lightkey_host"], self.config["lightkey_port"])
+            for sc in self.config.get("static_controls", []):
+                channels = sc.get("channels") or [
+                    {"property": "dimmer", "value": sc.get("value", 0)}
+                ]
+                if not self.fog_enabled:
+                    channels = [{**ch, "value": 0} for ch in channels]
+                osc.send_static(sc["name"], channels)
+        except Exception as e:
+            log.warning(f"Fog toggle send failed: {e}")
+        return self.fog_enabled
 
     def toggle(self):
         self.enabled = not self.enabled
@@ -637,6 +668,15 @@ class BridgeEngine:
             if frame is not None:
                 self._process_frame(frame)
 
+            # Static controls — off when paused or fog disabled
+            if self.enabled and self.fog_enabled:
+                for sc in self.config.get("static_controls", []):
+                    if self.osc:
+                        channels = sc.get("channels") or [
+                            {"property": "dimmer", "value": sc.get("value", 0)}
+                        ]
+                        self.osc.send_static(sc["name"], channels)
+
             frame_count += 1
             now = time.time()
             if now - last_fps >= 5.0:
@@ -653,11 +693,13 @@ class BridgeEngine:
         return {
             "running": self.running,
             "enabled": self.enabled,
+            "fog_enabled": self.fog_enabled,
             "status": self.status,
             "fps": self.fps_actual,
             "fixture_count": len(self.config.get("fixtures", [])),
             "bar_count": len(self.config.get("bars", [])),
             "total_count": len(self._get_all_fixtures()) if hasattr(self, "capture") else 0,
+            "static_count": len(self.config.get("static_controls", [])),
         }
 
 
@@ -892,6 +934,46 @@ def api_test_bar():
 @app.route("/api/bar-positions")
 def api_bar_positions():
     return jsonify({k: v["label"] for k, v in BAR_POSITIONS.items()})
+
+
+@app.route("/api/fog-toggle", methods=["POST"])
+def api_fog_toggle():
+    enabled = engine.toggle_fog()
+    return jsonify({"fog_enabled": enabled})
+
+
+@app.route("/api/static-controls", methods=["GET"])
+def api_static_get():
+    return jsonify(engine.config.get("static_controls", []))
+
+
+@app.route("/api/static-controls", methods=["POST"])
+def api_static_save():
+    controls = request.json
+    engine.config["static_controls"] = controls
+    engine.save_config(engine.config)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/static-send", methods=["POST"])
+def api_static_send():
+    data = request.json
+    name = data.get("name")
+    channels = data.get("channels") or [
+        {"property": "dimmer", "value": data.get("value", 0)}
+    ]
+    # Update in-memory config so the run loop uses the new values immediately
+    # (without this the loop overwrites the slider value with the stale saved config)
+    for sc in engine.config.get("static_controls", []):
+        if sc.get("name") == name:
+            sc["channels"] = channels
+            break
+    try:
+        osc = LightkeyOSC(engine.config["lightkey_host"], engine.config["lightkey_port"])
+        osc.send_static(name, channels)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 if __name__ == "__main__":

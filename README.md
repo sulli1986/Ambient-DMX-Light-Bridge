@@ -272,6 +272,37 @@ The OSC property name (e.g. `uV`) must match what Lightkey uses for that channel
 
 ---
 
+## Static Controls (Fog Machines / Hazers)
+
+The **Static Controls** tab lets you send constant values to a Lightkey fixture independent of screen content — useful for fog machines, hazers, strobe intensity, or any output that needs a fixed level.
+
+Go to the **Static Controls** tab:
+
+1. Click **+ Add Control**
+2. Choose **Single Dimmer** or **Hazer (Fog + Fan)**
+3. Enter the fixture **name** — must match the Lightkey short name exactly
+4. For hazers, enter the Lightkey property names for each channel — check the Lightkey **Design view** with your fixture selected to see what the channels are called, then replace spaces with underscores (e.g. `Hazer Output` → `Hazer_Output`)
+5. Click **Add**
+
+Sliders update Lightkey in real time. Values are also sent continuously while the bridge is running.
+
+### Fog On / Off button
+
+While the bridge is running a **Fog On / Fog Off** button appears in the sidebar. It toggles all static controls on or off instantly. Fog is automatically cleared when the bridge is stopped or paused.
+
+### Hazer OSC property names
+
+Lightkey uses these OSC property names for fog/hazer fixtures:
+
+| Channel | Lightkey OSC property | Value |
+|---------|----------------------|-------|
+| Hazer output | `fogAmount` | 0.0 – 1.0 |
+| Fan speed | depends on fixture profile (check Design view) | 0.0 – 1.0 |
+
+To find the correct property name: select your hazer in Lightkey, look at the Design view — the channel label shown there (with spaces replaced by underscores) is the OSC property name.
+
+---
+
 ## Light Bars
 
 Light bars are split into individually addressable segments, each becoming a
