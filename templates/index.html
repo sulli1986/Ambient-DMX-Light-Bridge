@@ -1,0 +1,1427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ambient DMX Bridge</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:        #0e0f11;
+    --surface:   #16181c;
+    --surface2:  #1e2026;
+    --border:    #2a2d35;
+    --accent:    #e8673a;
+    --accent2:   #5b8fff;
+    --green:     #3ddc84;
+    --red:       #ff5c5c;
+    --amber:     #ffb830;
+    --text:      #e8eaf0;
+    --muted:     #6b7280;
+    --mono:      'DM Mono', monospace;
+    --sans:      'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ---- HEADER ---- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: -0.3px;
+  }
+
+  .logo-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+    transition: background 0.3s;
+  }
+
+  .logo-dot.active { background: var(--green); box-shadow: 0 0 12px var(--green); }
+
+  .header-controls { display: flex; gap: 8px; align-items: center; }
+
+  /* ---- BUTTONS ---- */
+  .btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #d45a2e; border-color: #d45a2e; color: #fff; }
+  .btn-green { background: var(--green); border-color: var(--green); color: #000; }
+  .btn-green:hover { background: #32c070; border-color: #32c070; color: #000; }
+  .btn-red { background: var(--red); border-color: var(--red); color: #fff; }
+  .btn-red:hover { background: #e04a4a; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn-icon { padding: 7px 10px; }
+
+  /* ---- LAYOUT ---- */
+  .app-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    height: calc(100vh - 57px);
+  }
+
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 20px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .main {
+    overflow-y: auto;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* ---- SECTIONS ---- */
+  .section-title {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  /* ---- STATUS CARD ---- */
+  .status-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .status-badge.stopped { background: rgba(255,92,92,0.15); color: var(--red); }
+  .status-badge.running { background: rgba(61,220,132,0.15); color: var(--green); }
+  .status-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  .fps-display {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .big-controls { display: flex; gap: 8px; }
+  .big-controls .btn { flex: 1; justify-content: center; padding: 10px; }
+
+  /* ---- FORM FIELDS ---- */
+  .field { margin-bottom: 12px; }
+  .field label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 5px;
+    font-weight: 500;
+  }
+  .field input, .field select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    transition: border-color 0.15s;
+  }
+  .field input:focus, .field select:focus {
+    outline: none;
+    border-color: var(--accent2);
+  }
+  .field select option { background: var(--surface2); }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+  .range-field { display: flex; align-items: center; gap: 10px; }
+  .range-field input[type=range] {
+    flex: 1; padding: 0;
+    accent-color: var(--accent);
+    border: none; background: none;
+  }
+  .range-val {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  /* ---- PANEL CARD ---- */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .panel-body { padding: 18px; }
+
+  /* ---- ZONE EDITOR ---- */
+  .zone-editor-wrap {
+    position: relative;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  #zone-canvas {
+    display: block;
+    width: 100%;
+    cursor: crosshair;
+    border-radius: 8px;
+  }
+
+  .zone-editor-hint {
+    font-size: 11px;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  /* ---- FIXTURE LIST ---- */
+  .fixture-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .fixture-item {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: grid;
+    grid-template-columns: 14px 1fr auto auto auto;
+    align-items: center;
+    gap: 10px;
+    transition: border-color 0.15s;
+    cursor: pointer;
+  }
+  .fixture-item:hover { border-color: var(--accent2); }
+  .fixture-item.selected { border-color: var(--accent); background: rgba(232,103,58,0.08); }
+
+  .fixture-colour-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #444;
+    border: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+  }
+
+  .fixture-info { min-width: 0; }
+  .fixture-name { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fixture-type-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .fixture-actions { display: flex; gap: 4px; }
+
+  /* ---- ADD FIXTURE FORM ---- */
+  .add-fixture-form {
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin-top: 8px;
+  }
+
+  /* ---- TEST CONTROLS ---- */
+  .test-colours {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .colour-btn {
+    width: 32px; height: 32px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: transform 0.1s, border-color 0.15s;
+  }
+  .colour-btn:hover { transform: scale(1.1); border-color: rgba(255,255,255,0.3); }
+
+  /* ---- TABS ---- */
+  .tabs { display: flex; gap: 2px; margin-bottom: 20px; }
+  .tab {
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--muted);
+    transition: all 0.15s;
+    border: 1px solid transparent;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    background: var(--surface2);
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ---- SAVE BAR ---- */
+  .save-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    background: rgba(232,103,58,0.1);
+    border: 1px solid rgba(232,103,58,0.3);
+    border-radius: 8px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .save-bar.visible { display: flex; }
+  .save-bar-text { font-size: 13px; color: var(--accent); }
+
+  /* ---- TOAST ---- */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13px;
+    z-index: 999;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.2s;
+    pointer-events: none;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: var(--green); color: var(--green); }
+  .toast.error { border-color: var(--red); color: var(--red); }
+
+  /* ---- SCROLLBAR ---- */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ---- MONITOR GRID ---- */
+  .monitor-grid { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .monitor-card {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--muted);
+  }
+  .monitor-card:hover { border-color: var(--accent2); color: var(--text); }
+  .monitor-card.selected { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot" id="status-dot"></div>
+    Ambient DMX Bridge
+  </div>
+  <div class="header-controls">
+    <span class="fps-display" id="fps-display">— fps</span>
+    <button class="btn btn-sm" onclick="clearOverrides()">Clear Overrides</button>
+    <button class="btn btn-sm btn-primary" id="save-btn" onclick="saveConfig()" style="display:none">Save Changes</button>
+  </div>
+</header>
+
+<div class="app-layout">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+
+    <!-- STATUS -->
+    <div>
+      <div class="section-title">Status</div>
+      <div class="status-card">
+        <div class="status-row">
+          <span class="status-badge stopped" id="status-badge">
+            <span class="dot"></span>
+            <span id="status-text">Stopped</span>
+          </span>
+          <span class="fps-display" id="fps-badge">0 fps</span>
+        </div>
+        <div class="big-controls">
+          <button class="btn btn-green" id="start-btn" onclick="startBridge()">▶ Start</button>
+          <button class="btn btn-red" id="stop-btn" onclick="stopBridge()" style="display:none">■ Stop</button>
+          <button class="btn" id="toggle-btn" onclick="toggleBridge()" style="display:none">⏸ Pause</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OSC CONNECTION -->
+    <div>
+      <div class="section-title">Lightkey Connection</div>
+      <div class="field">
+        <label>IP Address</label>
+        <input type="text" id="lightkey_host" value="{{ config.lightkey_host }}" oninput="markDirty()">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>OSC Port</label>
+          <input type="number" id="lightkey_port" value="{{ config.lightkey_port }}" oninput="markDirty()">
+        </div>
+        <div class="field">
+          <label>Monitor #</label>
+          <input type="number" id="monitor" value="{{ config.monitor }}" oninput="markDirty()">
+        </div>
+      </div>
+      <button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:4px" onclick="loadMonitors()">Detect Monitors</button>
+      <div class="monitor-grid" id="monitor-grid"></div>
+    </div>
+
+    <!-- PERFORMANCE -->
+    <div>
+      <div class="section-title">Performance</div>
+      <div class="field">
+        <label>Sample Rate (fps)</label>
+        <div class="range-field">
+          <input type="range" min="1" max="30" id="sample_rate_fps" value="{{ config.sample_rate_fps }}"
+            oninput="this.nextElementSibling.textContent=this.value; markDirty()">
+          <span class="range-val">{{ config.sample_rate_fps }}</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Colour Smoothing</label>
+        <div class="range-field">
+          <input type="range" min="1" max="100" id="smoothing" value="{{ (config.smoothing * 100)|int }}"
+            oninput="this.nextElementSibling.textContent=(this.value/100).toFixed(2); markDirty()">
+          <span class="range-val">{{ config.smoothing }}</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Colour Boost</label>
+        <div class="range-field">
+          <input type="range" min="10" max="40" id="colour_boost" value="{{ (config.colour_boost * 10)|int }}"
+            oninput="this.nextElementSibling.textContent=(this.value/10).toFixed(1); markDirty()">
+          <span class="range-val">{{ config.colour_boost }}</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Master Brightness</label>
+        <div class="range-field">
+          <input type="range" min="0" max="255" id="master_brightness" value="{{ config.master_brightness }}"
+            oninput="this.nextElementSibling.textContent=this.value; markDirty()">
+          <span class="range-val">{{ config.master_brightness }}</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Min Brightness Threshold</label>
+        <div class="range-field">
+          <input type="range" min="0" max="100" id="min_brightness" value="{{ config.min_brightness }}"
+            oninput="this.nextElementSibling.textContent=this.value; markDirty()">
+          <span class="range-val">{{ config.min_brightness }}</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Min Output (floor — lights never go below this)</label>
+        <div class="range-field">
+          <input type="range" min="0" max="120" id="min_output" value="{{ config.get('min_output', 40) }}"
+            oninput="this.nextElementSibling.textContent=this.value; markDirty()">
+          <span class="range-val">{{ config.get('min_output', 40) }}</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Stage Coverage (% of lights kept lit on dark scenes)</label>
+        <div class="range-field">
+          <input type="range" min="0" max="100" id="stage_floor_pct" value="{{ config.get('stage_floor_pct', 50) }}"
+            oninput="this.nextElementSibling.textContent=this.value+'%'; markDirty()">
+          <span class="range-val">{{ config.get('stage_floor_pct', 50) }}%</span>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main">
+
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('fixtures')">Fixtures</div>
+      <div class="tab" onclick="switchTab('bars')">Light Bars</div>
+      <div class="tab" onclick="switchTab('zones')">Zone Editor</div>
+      <div class="tab" onclick="switchTab('test')">Test</div>
+    </div>
+
+    <!-- FIXTURES TAB -->
+    <div class="tab-content active" id="tab-fixtures">
+
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/>
+            </svg>
+            Fixtures
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="showAddFixture()">+ Add Fixture</button>
+        </div>
+        <div class="panel-body">
+
+          <div class="fixture-list" id="fixture-list">
+            <!-- populated by JS -->
+          </div>
+
+          <!-- ADD FIXTURE FORM -->
+          <div class="add-fixture-form" id="add-fixture-form" style="display:none">
+            <div class="section-title" style="margin-bottom:12px">New Fixture</div>
+            <div class="field-row">
+              <div class="field">
+                <label>Name (matches Lightkey short name)</label>
+                <input type="text" id="new-fx-name" placeholder="e.g. P1">
+              </div>
+              <div class="field">
+                <label>Fixture Type</label>
+                <select id="new-fx-type">
+                  {% for key, fx in fixture_types.items() %}
+                  <option value="{{ key }}">{{ fx.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="field">
+              <label>Zone (assign in Zone Editor after adding)</label>
+              <div style="font-size:11px;color:var(--muted)">Default zone covers full frame — edit in Zone Editor tab</div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:4px">
+              <button class="btn btn-primary btn-sm" onclick="addFixture()">Add</button>
+              <button class="btn btn-sm" onclick="hideAddFixture()">Cancel</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- BARS TAB -->
+    <div class="tab-content" id="tab-bars">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="8" width="20" height="8" rx="2"/>
+              <line x1="6" y1="8" x2="6" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/>
+              <line x1="14" y1="8" x2="14" y2="16"/><line x1="18" y1="8" x2="18" y2="16"/>
+            </svg>
+            Light Bars
+          </div>
+          <button class="btn btn-sm btn-primary" onclick="showAddBar()">+ Add Bar</button>
+        </div>
+        <div class="panel-body">
+
+          <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+            Each bar is split into individually addressable segments. Each segment becomes
+            a separate Lightkey fixture. Name segments in Lightkey using the same prefix and
+            number pattern defined here (e.g. <span style="font-family:var(--mono);color:var(--accent)">B1-1</span>,
+            <span style="font-family:var(--mono);color:var(--accent)">B1-2</span> ... <span style="font-family:var(--mono);color:var(--accent)">B1-N</span>).
+          </div>
+
+          <div class="fixture-list" id="bar-list"></div>
+
+          <!-- ADD BAR FORM -->
+          <div class="add-fixture-form" id="add-bar-form" style="display:none">
+            <div class="section-title" style="margin-bottom:12px">New Light Bar</div>
+
+            <div class="field-row">
+              <div class="field">
+                <label>Name Prefix (e.g. B1-)</label>
+                <input type="text" id="new-bar-prefix" placeholder="B1-" oninput="previewBar()">
+              </div>
+              <div class="field">
+                <label>Segments</label>
+                <input type="number" id="new-bar-segments" value="8" min="2" max="64" oninput="previewBar()">
+              </div>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label>Segment Type</label>
+                <select id="new-bar-type" onchange="previewBar()">
+                  {% for key, fx in fixture_types.items() %}
+                  <option value="{{ key }}">{{ fx.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label>Position</label>
+                <select id="new-bar-position" onchange="previewBar()">
+                  <option value="top">Top</option>
+                  <option value="bottom">Bottom</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                  <option value="custom">Custom (draw in Zone Editor)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field" id="bar-axis-field" style="display:none">
+              <label>Axis (for custom position)</label>
+              <select id="new-bar-axis" onchange="previewBar()">
+                <option value="horizontal">Horizontal (segments left→right)</option>
+                <option value="vertical">Vertical (segments top→bottom)</option>
+              </select>
+            </div>
+
+            <!-- Segment preview -->
+            <div class="field">
+              <label>Segment Preview</label>
+              <div id="bar-segment-preview" style="
+                display:flex;gap:3px;padding:10px;
+                background:var(--bg);border-radius:6px;
+                border:1px solid var(--border);
+                flex-wrap:wrap;min-height:36px;align-items:center
+              "></div>
+              <div id="bar-segment-names" style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-top:4px"></div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:4px">
+              <button class="btn btn-primary btn-sm" onclick="addBar()">Add Bar</button>
+              <button class="btn btn-sm" onclick="hideAddBar()">Cancel</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ZONE EDITOR TAB -->
+    <div class="tab-content" id="tab-zones">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Zone Editor</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <select id="zone-fixture-select" class="btn btn-sm" onchange="selectZoneFixture()" style="padding:5px 10px">
+              <option value="">Select fixture...</option>
+            </select>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="zone-editor-hint">
+            Select a fixture, then drag on the preview to set its zone. Bar segments are shown as read-only previews — edit bars in the Light Bars tab.
+          </div>
+          <div class="zone-editor-wrap">
+            <canvas id="zone-canvas" height="270"></canvas>
+          </div>
+          <div id="zone-coords" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TEST TAB -->
+    <div class="tab-content" id="tab-test">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Test Controls</div>
+        </div>
+        <div class="panel-body">
+
+          <div class="section-title">All Fixtures</div>
+          <div class="test-colours" style="margin-bottom:20px">
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-sm" onclick="testAll('red')">Red</button>
+              <button class="btn btn-sm" onclick="testAll('green')">Green</button>
+              <button class="btn btn-sm" onclick="testAll('blue')">Blue</button>
+              <button class="btn btn-sm" onclick="testAll('white')">White</button>
+              <button class="btn btn-sm" onclick="testAll('amber')">Amber</button>
+              <button class="btn btn-sm btn-red" onclick="testAll('off')">Off</button>
+            </div>
+          </div>
+
+          <div class="section-title">Individual Fixtures</div>
+          <div id="individual-test-list" class="fixture-list">
+            <!-- populated by JS -->
+          </div>
+
+        </div>
+      </div>
+
+      <!-- WEBHOOKS PANEL -->
+      <div class="panel" style="margin-top:24px">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+            Webhooks (Stream Deck / Remote Control)
+          </div>
+        </div>
+        <div class="panel-body">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+            Trigger pause/resume from a Stream Deck or any device on the network using a
+            <strong>Website</strong> or <strong>HTTP Request</strong> button. These URLs accept a
+            simple GET request — just paste them into the Stream Deck button's URL field.
+          </div>
+
+          <div id="webhook-list" style="display:flex;flex-direction:column;gap:8px">
+            <!-- populated by JS -->
+          </div>
+
+          <div style="font-size:11px;color:var(--muted);margin-top:14px;line-height:1.6">
+            <strong>Stream Deck setup:</strong> add a "Website" action, paste a URL, and enable
+            "Access in background" so it fires without opening a browser. For a single toggle
+            button use the <span style="font-family:var(--mono);color:var(--accent)">/hook/toggle</span> URL.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ---- STATE ----
+let config = {{ config | tojson }};
+let dirty = false;
+let selectedZoneFixture = null;
+let isDrawing = false;
+let drawStart = null;
+const fixtureTypes = {{ fixture_types | tojson }};
+
+// ---- INIT ----
+document.addEventListener('DOMContentLoaded', () => {
+  if (!config.bars) config.bars = [];
+  renderFixtures();
+  renderBars();
+  renderZoneFixtureSelect();
+  renderIndividualTests();
+  startPolling();
+  initZoneCanvas();
+  loadMonitors();
+  loadWebhooks();
+});
+
+// ---- WEBHOOKS ----
+async function loadWebhooks() {
+  let ip = 'localhost', port = 5000;
+  try {
+    const r = await fetch('/api/local-ip');
+    const d = await r.json();
+    ip = d.ip; port = d.port;
+  } catch (e) { /* fallback to localhost */ }
+
+  const base = `http://${ip}:${port}`;
+  const hooks = [
+    { label: 'Toggle Pause/Resume', path: '/hook/toggle', colour: 'var(--accent)', desc: 'Single button — flips between paused and running' },
+    { label: 'Pause', path: '/hook/pause', colour: 'var(--amber)', desc: 'Clears overrides, hands control to LD' },
+    { label: 'Resume', path: '/hook/resume', colour: 'var(--green)', desc: 'Resumes ambient control' },
+    { label: 'Start', path: '/hook/start', colour: 'var(--green)', desc: 'Starts the bridge' },
+    { label: 'Stop', path: '/hook/stop', colour: 'var(--red)', desc: 'Stops and clears all overrides' },
+  ];
+
+  const list = document.getElementById('webhook-list');
+  list.innerHTML = hooks.map(h => `
+    <div style="
+      display:flex;align-items:center;gap:12px;
+      background:var(--surface2);border:1px solid var(--border);
+      border-radius:8px;padding:10px 12px
+    ">
+      <div style="width:8px;height:8px;border-radius:50%;background:${h.colour};flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13px">${h.label}</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${base}${h.path}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${h.desc}</div>
+      </div>
+      <button class="btn btn-sm" onclick="copyWebhook('${base}${h.path}')">Copy</button>
+    </div>
+  `).join('');
+}
+
+function copyWebhook(url) {
+  navigator.clipboard.writeText(url).then(
+    () => toast('Webhook URL copied', 'success'),
+    () => toast('Copy failed — select manually', 'error')
+  );
+}
+
+// ---- STATUS POLLING ----
+function startPolling() {
+  setInterval(async () => {
+    const r = await fetch('/api/state');
+    const s = await r.json();
+    updateStatus(s);
+  }, 1000);
+
+  // Live colour preview on fixture dots (faster refresh when running)
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/live-colours');
+      const colours = await r.json();
+      (config.fixtures || []).forEach((fx, i) => {
+        const dot = document.getElementById('fx-dot-' + i);
+        if (dot && colours[fx.name]) {
+          const c = colours[fx.name];
+          dot.style.background = `rgb(${c.r},${c.g},${c.b})`;
+          dot.style.borderColor = `rgb(${c.r},${c.g},${c.b})`;
+        }
+      });
+    } catch (e) { /* ignore */ }
+  }, 300);
+}
+
+function updateStatus(s) {
+  const dot = document.getElementById('status-dot');
+  const badge = document.getElementById('status-badge');
+  const text = document.getElementById('status-text');
+  const fps = document.getElementById('fps-badge');
+  document.getElementById('fps-display').textContent = s.fps + ' fps';
+  fps.textContent = s.fps + ' fps';
+
+  if (s.running) {
+    dot.classList.add('active');
+    badge.className = 'status-badge running';
+    text.textContent = s.enabled ? 'Running' : 'Paused';
+    document.getElementById('start-btn').style.display = 'none';
+    document.getElementById('stop-btn').style.display = '';
+    document.getElementById('toggle-btn').style.display = '';
+    document.getElementById('toggle-btn').textContent = s.enabled ? '⏸ Pause' : '▶ Resume';
+  } else {
+    dot.classList.remove('active');
+    badge.className = 'status-badge stopped';
+    text.textContent = 'Stopped';
+    document.getElementById('start-btn').style.display = '';
+    document.getElementById('stop-btn').style.display = 'none';
+    document.getElementById('toggle-btn').style.display = 'none';
+  }
+}
+
+// ---- BRIDGE CONTROLS ----
+async function startBridge() {
+  await saveConfig(true);
+  await fetch('/api/start', { method: 'POST' });
+  toast('Bridge started', 'success');
+}
+
+async function stopBridge() {
+  await fetch('/api/stop', { method: 'POST' });
+  toast('Bridge stopped, overrides cleared', 'success');
+}
+
+async function toggleBridge() {
+  const r = await fetch('/api/toggle', { method: 'POST' });
+  const d = await r.json();
+  toast(d.enabled ? 'Bridge enabled' : 'Bridge paused — manual control active', 'success');
+}
+
+async function clearOverrides() {
+  await fetch('/api/clear-overrides', { method: 'POST' });
+  toast('All overrides cleared', 'success');
+}
+
+// ---- TABS ----
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    const tabs = ['fixtures', 'bars', 'zones', 'test'];
+    t.classList.toggle('active', tabs[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => {
+    c.classList.toggle('active', c.id === 'tab-' + name);
+  });
+  if (name === 'zones') renderZoneCanvas();
+  if (name === 'bars') renderBars();
+}
+
+// ---- CONFIG ----
+function markDirty() {
+  dirty = true;
+  document.getElementById('save-btn').style.display = '';
+}
+
+async function saveConfig(silent = false) {
+  config.lightkey_host = document.getElementById('lightkey_host').value;
+  config.lightkey_port = parseInt(document.getElementById('lightkey_port').value);
+  config.monitor = parseInt(document.getElementById('monitor').value);
+  config.sample_rate_fps = parseInt(document.getElementById('sample_rate_fps').value);
+  config.smoothing = parseInt(document.getElementById('smoothing').value) / 100;
+  config.colour_boost = parseInt(document.getElementById('colour_boost').value) / 10;
+  config.master_brightness = parseInt(document.getElementById('master_brightness').value);
+  config.min_brightness = parseInt(document.getElementById('min_brightness').value);
+  config.min_output = parseInt(document.getElementById('min_output').value);
+  config.stage_floor_pct = parseInt(document.getElementById('stage_floor_pct').value);
+
+  await fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config)
+  });
+
+  dirty = false;
+  document.getElementById('save-btn').style.display = 'none';
+  if (!silent) toast('Configuration saved', 'success');
+}
+
+// ---- FIXTURES ----
+function renderFixtures() {
+  const list = document.getElementById('fixture-list');
+  if (!config.fixtures || config.fixtures.length === 0) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No fixtures added yet</div>';
+    return;
+  }
+  list.innerHTML = config.fixtures.map((fx, i) => `
+    <div class="fixture-item" id="fx-item-${i}">
+      <div class="fixture-colour-dot" id="fx-dot-${i}"></div>
+      <div class="fixture-info">
+        <div class="fixture-name">${fx.name}</div>
+        <div class="fixture-type-badge">${fixtureTypes[fx.type]?.label || fx.type}</div>
+      </div>
+      <select class="btn btn-sm btn-icon" onchange="changeFixtureType(${i}, this.value)" onclick="event.stopPropagation()">
+        ${Object.entries(fixtureTypes).map(([k,v]) =>
+          `<option value="${k}" ${fx.type===k?'selected':''}>${v.label}</option>`
+        ).join('')}
+      </select>
+      <button class="btn btn-sm btn-icon" onclick="event.stopPropagation(); editFixtureZone(${i})" title="Edit Zone">⬡</button>
+      <button class="btn btn-sm btn-icon" onclick="event.stopPropagation(); removeFixture(${i})" title="Remove">✕</button>
+    </div>
+  `).join('');
+}
+
+function renderZoneFixtureSelect() {
+  const sel = document.getElementById('zone-fixture-select');
+  sel.innerHTML = '<option value="">Select fixture...</option>' +
+    (config.fixtures || []).map((fx, i) =>
+      `<option value="${i}">${fx.name}</option>`
+    ).join('');
+}
+
+function renderIndividualTests() {
+  const list = document.getElementById('individual-test-list');
+  if (!config.fixtures || config.fixtures.length === 0) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px">No fixtures configured</div>';
+    return;
+  }
+  list.innerHTML = config.fixtures.map(fx => `
+    <div class="fixture-item">
+      <div class="fixture-colour-dot"></div>
+      <div class="fixture-info">
+        <div class="fixture-name">${fx.name}</div>
+        <div class="fixture-type-badge">${fixtureTypes[fx.type]?.label || fx.type}</div>
+      </div>
+      <div style="display:flex;gap:4px">
+        ${['red','green','blue','white','amber','off'].map(c =>
+          `<button class="btn btn-sm btn-icon" onclick="testFixture('${fx.name}','${c}','${fx.type}')"
+            style="background:${colourHex(c)};border-color:${colourHex(c)};color:${c==='off'?'#fff':c==='white'||c==='amber'?'#000':'#fff'};font-size:10px;padding:4px 7px"
+          >${c}</button>`
+        ).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+function colourHex(c) {
+  return {red:'#e74c3c',green:'#2ecc71',blue:'#3498db',white:'#ecf0f1',amber:'#f39c12',off:'#2c3e50'}[c]||'#444';
+}
+
+function showAddFixture() {
+  document.getElementById('add-fixture-form').style.display = '';
+  document.getElementById('new-fx-name').focus();
+}
+
+function hideAddFixture() {
+  document.getElementById('add-fixture-form').style.display = 'none';
+}
+
+function addFixture() {
+  const name = document.getElementById('new-fx-name').value.trim();
+  const type = document.getElementById('new-fx-type').value;
+  if (!name) { toast('Enter a fixture name', 'error'); return; }
+
+  config.fixtures.push({
+    name,
+    type,
+    zone: { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0 }
+  });
+
+  hideAddFixture();
+  document.getElementById('new-fx-name').value = '';
+  renderFixtures();
+  renderZoneFixtureSelect();
+  renderIndividualTests();
+  markDirty();
+  toast(`${name} added`, 'success');
+}
+
+function removeFixture(i) {
+  const name = config.fixtures[i].name;
+  config.fixtures.splice(i, 1);
+  renderFixtures();
+  renderZoneFixtureSelect();
+  renderIndividualTests();
+  markDirty();
+  toast(`${name} removed`, 'success');
+}
+
+function changeFixtureType(i, type) {
+  config.fixtures[i].type = type;
+  markDirty();
+}
+
+function editFixtureZone(i) {
+  switchTab('zones');
+  document.getElementById('zone-fixture-select').value = i;
+  selectZoneFixture();
+}
+
+// ---- ZONE CANVAS ----
+let canvas, ctx;
+
+function initZoneCanvas() {
+  canvas = document.getElementById('zone-canvas');
+  ctx = canvas.getContext('2d');
+
+  canvas.addEventListener('mousedown', onCanvasDown);
+  canvas.addEventListener('mousemove', onCanvasMove);
+  canvas.addEventListener('mouseup', onCanvasUp);
+  canvas.addEventListener('mouseleave', onCanvasUp);
+
+  renderZoneCanvas();
+}
+
+function renderZoneCanvas() {
+  if (!canvas) return;
+  const W = canvas.offsetWidth;
+  canvas.width = W;
+  canvas.height = Math.round(W * 9/16);
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw a simple grid to represent the video frame
+  ctx.strokeStyle = '#1e2026';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= 10; x++) {
+    ctx.beginPath();
+    ctx.moveTo(x * canvas.width/10, 0);
+    ctx.lineTo(x * canvas.width/10, canvas.height);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= 6; y++) {
+    ctx.beginPath();
+    ctx.moveTo(0, y * canvas.height/6);
+    ctx.lineTo(canvas.width, y * canvas.height/6);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = 'rgba(255,255,255,0.03)';
+  ctx.font = '13px DM Mono, monospace';
+  ctx.fillStyle = '#2a2d35';
+  ctx.textAlign = 'center';
+  ctx.fillText('VIDEO FRAME', canvas.width/2, canvas.height/2);
+
+  // Draw all fixture zones
+  (config.fixtures || []).forEach((fx, i) => {
+    if (!fx.zone) return;
+    const z = fx.zone;
+    const x = z.x1 * canvas.width;
+    const y = z.y1 * canvas.height;
+    const w = (z.x2 - z.x1) * canvas.width;
+    const h = (z.y2 - z.y1) * canvas.height;
+
+    const isSelected = selectedZoneFixture === i;
+    const col = zoneColour(i);
+
+    ctx.fillStyle = col.replace('1)', '0.15)');
+    ctx.fillRect(x, y, w, h);
+
+    ctx.strokeStyle = col;
+    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeRect(x, y, w, h);
+
+    ctx.fillStyle = col;
+    ctx.font = `${isSelected ? 'bold ' : ''}11px DM Mono, monospace`;
+    ctx.textAlign = 'left';
+    ctx.fillText(fx.name, x + 4, y + 14);
+  });
+
+  // Draw bar segments (read-only preview in zone editor)
+  (config.bars || []).forEach((bar, bi) => {
+    const segs = generateBarSegmentsClient(bar);
+    const col = zoneColour((config.fixtures||[]).length + bi);
+    segs.forEach((seg) => {
+      const z = seg.zone;
+      const x = z.x1 * canvas.width;
+      const y = z.y1 * canvas.height;
+      const w = (z.x2 - z.x1) * canvas.width;
+      const h = (z.y2 - z.y1) * canvas.height;
+      ctx.fillStyle = col.replace('1)', '0.12)');
+      ctx.fillRect(x, y, w, h);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, w, h);
+    });
+    // Label the bar at its first segment
+    if (segs.length) {
+      const z = segs[0].zone;
+      ctx.fillStyle = col;
+      ctx.font = '10px DM Mono, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(bar.name_prefix + '*', z.x1 * canvas.width + 3, z.y1 * canvas.height + 12);
+    }
+  });
+}
+
+// Client-side bar segment generation (mirrors server logic for preview)
+function generateBarSegmentsClient(bar) {
+  const segments = bar.segments || 8;
+  let zone = bar.zone || {x1:0.03,y1:0.03,x2:0.97,y2:0.97};
+  const position = bar.position || 'top';
+  const positions = {
+    top:    {axis:'horizontal', y1:0.03, y2:0.25},
+    bottom: {axis:'horizontal', y1:0.75, y2:0.97},
+    left:   {axis:'vertical',   x1:0.03, x2:0.22},
+    right:  {axis:'vertical',   x1:0.78, x2:0.97},
+  };
+  let axis = 'horizontal';
+  if (position !== 'custom' && positions[position]) {
+    const p = positions[position];
+    axis = p.axis;
+    if (p.axis === 'horizontal') {
+      zone = {x1: zone.x1??0.03, y1: p.y1, x2: zone.x2??0.97, y2: p.y2};
+    } else {
+      zone = {x1: p.x1, y1: zone.y1??0.03, x2: p.x2, y2: zone.y2??0.97};
+    }
+  } else {
+    axis = bar.axis || 'horizontal';
+  }
+  const out = [];
+  for (let i = 0; i < segments; i++) {
+    const t = i/segments, t2 = (i+1)/segments;
+    let z;
+    if (axis === 'horizontal') {
+      z = {x1: zone.x1 + t*(zone.x2-zone.x1), y1: zone.y1,
+           x2: zone.x1 + t2*(zone.x2-zone.x1), y2: zone.y2};
+    } else {
+      z = {x1: zone.x1, y1: zone.y1 + t*(zone.y2-zone.y1),
+           x2: zone.x2, y2: zone.y1 + t2*(zone.y2-zone.y1)};
+    }
+    out.push({name: bar.name_prefix + (i+1), zone: z});
+  }
+  return out;
+}
+
+function zoneColour(i) {
+  const cols = [
+    'rgba(232,103,58,1)', 'rgba(91,143,255,1)', 'rgba(61,220,132,1)',
+    'rgba(255,184,48,1)', 'rgba(200,100,255,1)', 'rgba(255,100,150,1)',
+    'rgba(100,220,220,1)', 'rgba(220,180,100,1)', 'rgba(150,255,100,1)',
+    'rgba(255,150,100,1)', 'rgba(100,150,255,1)', 'rgba(255,220,100,1)',
+  ];
+  return cols[i % cols.length];
+}
+
+function selectZoneFixture() {
+  const val = document.getElementById('zone-fixture-select').value;
+  selectedZoneFixture = val === '' ? null : parseInt(val);
+  renderZoneCanvas();
+}
+
+function canvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) / rect.width,
+    y: (e.clientY - rect.top) / rect.height
+  };
+}
+
+function onCanvasDown(e) {
+  if (selectedZoneFixture === null) return;
+  isDrawing = true;
+  drawStart = canvasCoords(e);
+}
+
+function onCanvasMove(e) {
+  if (!isDrawing || selectedZoneFixture === null) return;
+  const pos = canvasCoords(e);
+  const z = {
+    x1: Math.min(drawStart.x, pos.x),
+    y1: Math.min(drawStart.y, pos.y),
+    x2: Math.max(drawStart.x, pos.x),
+    y2: Math.max(drawStart.y, pos.y)
+  };
+  config.fixtures[selectedZoneFixture].zone = z;
+  renderZoneCanvas();
+
+  document.getElementById('zone-coords').textContent =
+    `${config.fixtures[selectedZoneFixture].name}: ` +
+    `x1=${z.x1.toFixed(2)} y1=${z.y1.toFixed(2)} x2=${z.x2.toFixed(2)} y2=${z.y2.toFixed(2)}`;
+}
+
+function onCanvasUp(e) {
+  if (!isDrawing) return;
+  isDrawing = false;
+  markDirty();
+  renderZoneCanvas();
+}
+
+// ---- MONITORS ----
+async function loadMonitors() {
+  const r = await fetch('/api/monitors');
+  const monitors = await r.json();
+  const grid = document.getElementById('monitor-grid');
+  grid.innerHTML = monitors.map(m =>
+    `<div class="monitor-card ${m.index===config.monitor?'selected':''}"
+      onclick="selectMonitor(${m.index})">
+      Monitor ${m.index}<br>
+      <span style="font-size:10px">${m.width}×${m.height}</span>
+    </div>`
+  ).join('');
+}
+
+function selectMonitor(idx) {
+  config.monitor = idx;
+  document.getElementById('monitor').value = idx;
+  document.querySelectorAll('.monitor-card').forEach(c => {
+    c.classList.toggle('selected', parseInt(c.textContent) === idx);
+  });
+  markDirty();
+}
+
+// ---- TEST ----
+async function testAll(colour) {
+  await saveConfig(true);
+  await fetch('/api/test-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ colour })
+  });
+  toast(`Sent ${colour} to all fixtures`, 'success');
+}
+
+async function testFixture(name, colour, type) {
+  await fetch(`/api/test/${name}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ colour, type })
+  });
+}
+
+// ---- TOAST ----
+function toast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+
+// ---- BARS ----
+function renderBars() {
+  const list = document.getElementById('bar-list');
+  const bars = config.bars || [];
+  if (bars.length === 0) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No light bars added yet</div>';
+    return;
+  }
+  list.innerHTML = bars.map((bar, i) => {
+    const segCount = bar.segments || 0;
+    return `
+    <div class="fixture-item">
+      <div class="fixture-colour-dot" style="background:${zoneColour(i)};border-color:${zoneColour(i)}"></div>
+      <div class="fixture-info">
+        <div class="fixture-name">${bar.name_prefix}1 … ${bar.name_prefix}${segCount}</div>
+        <div class="fixture-type-badge">${segCount} segments · ${(fixtureTypes[bar.type]||{label:bar.type}).label} · ${bar.position}</div>
+      </div>
+      <button class="btn btn-sm btn-icon" onclick="testBar(${i},'red')" title="Test Red" style="background:#c0392b;border-color:#c0392b;color:#fff">R</button>
+      <button class="btn btn-sm btn-icon" onclick="testBar(${i},'off')" title="Off">Off</button>
+      <button class="btn btn-sm btn-icon" onclick="removeBar(${i})" title="Remove">✕</button>
+    </div>`;
+  }).join('');
+}
+
+function showAddBar() {
+  document.getElementById('add-bar-form').style.display = '';
+  previewBar();
+}
+
+function hideAddBar() {
+  document.getElementById('add-bar-form').style.display = 'none';
+}
+
+function previewBar() {
+  const prefix = document.getElementById('new-bar-prefix').value || 'B-';
+  const segments = parseInt(document.getElementById('new-bar-segments').value) || 8;
+  const position = document.getElementById('new-bar-position').value;
+
+  // Show/hide axis selector for custom position
+  document.getElementById('bar-axis-field').style.display = position === 'custom' ? '' : 'none';
+
+  // Render segment cells
+  const preview = document.getElementById('bar-segment-preview');
+  const names = document.getElementById('bar-segment-names');
+  const cols = ['#e8673a','#5b8fff','#3ddc84','#ffb830','#c87aff','#ff7eb3',
+                '#7ae8e8','#e8d47a','#7ae8a0','#e87a7a','#7ab0e8','#e8c07a'];
+  preview.innerHTML = Array.from({length: segments}, (_, i) =>
+    `<div style="
+      width:${Math.max(8, Math.min(28, Math.floor(400/segments)))}px;
+      height:24px;border-radius:3px;
+      background:${cols[i % cols.length]};
+      opacity:0.8;
+      title="${prefix}${i+1}"
+    "></div>`
+  ).join('');
+  names.textContent = `${prefix}1, ${prefix}2 ... ${prefix}${segments}  (${segments} Lightkey fixtures needed)`;
+}
+
+function addBar() {
+  const prefix = document.getElementById('new-bar-prefix').value.trim();
+  const segments = parseInt(document.getElementById('new-bar-segments').value);
+  const type = document.getElementById('new-bar-type').value;
+  const position = document.getElementById('new-bar-position').value;
+  const axis = document.getElementById('new-bar-axis').value;
+
+  if (!prefix) { toast('Enter a name prefix', 'error'); return; }
+  if (!segments || segments < 2) { toast('Need at least 2 segments', 'error'); return; }
+
+  if (!config.bars) config.bars = [];
+  config.bars.push({
+    name_prefix: prefix,
+    segments,
+    type,
+    position,
+    axis,
+    zone: { x1: 0.03, y1: 0.03, x2: 0.97, y2: 0.97 }
+  });
+
+  hideAddBar();
+  renderBars();
+  markDirty();
+  toast(`Bar ${prefix}1–${prefix}${segments} added`, 'success');
+}
+
+function removeBar(i) {
+  const bar = config.bars[i];
+  config.bars.splice(i, 1);
+  renderBars();
+  markDirty();
+  toast(`Bar ${bar.name_prefix} removed`, 'success');
+}
+
+async function testBar(i, colour) {
+  await saveConfig(true);
+  const bar = config.bars[i];
+  await fetch('/api/test-bar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bar, colour })
+  });
+  toast(`Sent ${colour} to ${bar.name_prefix}1–${bar.name_prefix}${bar.segments}`, 'success');
+}
+
+// Update testAll to include bar segments
+const _origTestAll = testAll;
+async function testAll(colour) {
+  await saveConfig(true);
+  await fetch('/api/test-all', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ colour })
+  });
+  // Also test bars
+  for (const bar of (config.bars || [])) {
+    await fetch('/api/test-bar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bar, colour })
+    });
+  }
+  toast(`Sent ${colour} to all fixtures and bars`, 'success');
+}
+
+// Redraw canvas on resize
+window.addEventListener('resize', () => renderZoneCanvas());
+</script>
+
+</body>
+</html>

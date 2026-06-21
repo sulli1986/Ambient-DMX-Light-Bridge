@@ -1,0 +1,73 @@
+{
+  "lightkey_host": "192.168.0.14",
+  "lightkey_port": 21600,
+  "monitor": 4,
+  "sample_rate_fps": 15,
+  "smoothing": 0.12,
+  "min_brightness": 30,
+  "colour_boost": 4.0,
+  "white_mode": "min",
+  "master_brightness": 255,
+  "fixtures": [
+    {
+      "name": "P1",
+      "type": "RGBW",
+      "zone": { "x1": 0.03, "y1": 0.08, "x2": 0.18, "y2": 0.30 }
+    },
+    {
+      "name": "P2",
+      "type": "RGBW",
+      "zone": { "x1": 0.08, "y1": 0.08, "x2": 0.25, "y2": 0.30 }
+    },
+    {
+      "name": "P3",
+      "type": "RGBA",
+      "zone": { "x1": 0.33, "y1": 0.08, "x2": 0.50, "y2": 0.30 }
+    },
+    {
+      "name": "P4",
+      "type": "RGBA",
+      "zone": { "x1": 0.50, "y1": 0.08, "x2": 0.67, "y2": 0.30 }
+    },
+    {
+      "name": "P5",
+      "type": "RGBW",
+      "zone": { "x1": 0.75, "y1": 0.08, "x2": 0.92, "y2": 0.30 }
+    },
+    {
+      "name": "P6",
+      "type": "RGBW",
+      "zone": { "x1": 0.82, "y1": 0.08, "x2": 0.97, "y2": 0.30 }
+    },
+    {
+      "name": "P8",
+      "type": "RGBW",
+      "zone": { "x1": 0.03, "y1": 0.70, "x2": 0.18, "y2": 0.92 }
+    },
+    {
+      "name": "P9",
+      "type": "RGBW",
+      "zone": { "x1": 0.10, "y1": 0.70, "x2": 0.25, "y2": 0.92 }
+    },
+    {
+      "name": "P10",
+      "type": "RGBW",
+      "zone": { "x1": 0.18, "y1": 0.70, "x2": 0.33, "y2": 0.92 }
+    },
+    {
+      "name": "P12",
+      "type": "RGBW",
+      "zone": { "x1": 0.67, "y1": 0.70, "x2": 0.82, "y2": 0.92 }
+    },
+    {
+      "name": "P13",
+      "type": "RGBW",
+      "zone": { "x1": 0.75, "y1": 0.70, "x2": 0.90, "y2": 0.92 }
+    },
+    {
+      "name": "P14",
+      "type": "RGBW",
+      "zone": { "x1": 0.82, "y1": 0.70, "x2": 0.97, "y2": 0.92 }
+    }
+  ]
+}
