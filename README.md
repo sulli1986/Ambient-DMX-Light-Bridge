@@ -18,7 +18,7 @@ ProPresenter (or any video output)
         ↓
   RGBW / RGBA / RGBWW / RGBAW / RGB conversion
         ↓
-  OSC → Lightkey (Mac or Windows)
+  OSC → Lightkey (Mac only)
         ↓
   DMX → Fixtures
 ```
@@ -31,7 +31,7 @@ Each fixture is assigned a **zone** — a rectangular region of the video frame.
 
 - **Windows** (tested on Windows 11) — runs on the same machine as ProPresenter
 - **Python 3.10+** — download from [python.org](https://python.org) (tick "Add to PATH")
-- **Lightkey** — running on Mac or Windows on the same network
+- **Lightkey** — running on Mac on the same network
 - **OSC enabled** in Lightkey (Settings > External Control > OSC)
 
 ---
@@ -177,7 +177,7 @@ This samples the top-left quarter of the frame. Use the Zone Editor to draw zone
 
 ## Lightkey OSC Setup
 
-1. Open Lightkey on Mac/Windows
+1. Open Lightkey on Mac
 2. Go to **Settings (⌘,)** > **External Control** tab
 3. Enable **Receive OSC messages**
 4. Note the port number — enter this in the app's sidebar
