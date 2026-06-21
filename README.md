@@ -4,7 +4,7 @@ A real-time screen-to-light colour bridge. Captures a video output screen (e.g. 
 
 Built for live worship environments but works with any video source and any Lightkey-controlled DMX rig.
 
-![Ambient DMX Bridge UI](docs/screenshot.png)
+![Ambient DMX Bridge UI](screenshot.jpeg)
 
 ## See It In Action
 
