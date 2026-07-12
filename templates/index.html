@@ -437,6 +437,9 @@
         <div id="fog-row" style="display:none;margin-top:8px">
           <button class="btn" id="fog-btn" onclick="toggleFog()" style="width:100%;justify-content:center;padding:10px">Toggle Fog</button>
         </div>
+        <div id="kick-row" style="margin-top:8px">
+          <button class="btn btn-green" id="kick-btn" onclick="toggleKick()" style="width:100%;justify-content:center;padding:10px">Enable Kick Strobe</button>
+        </div>
       </div>
     </div>
 
@@ -531,6 +534,7 @@
       <div class="tab active" onclick="switchTab('fixtures')">Fixtures</div>
       <div class="tab" onclick="switchTab('bars')">Light Bars</div>
       <div class="tab" onclick="switchTab('static')">Static Controls</div>
+      <div class="tab" onclick="switchTab('kick')">Kick Strobe</div>
       <div class="tab" onclick="switchTab('zones')">Zone Editor</div>
       <div class="tab" onclick="switchTab('test')">Test</div>
     </div>
@@ -757,6 +761,77 @@
       </div>
     </div>
 
+    <!-- KICK STROBE TAB -->
+    <div class="tab-content" id="tab-kick">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="2 12 6 12 9 4 15 20 18 12 22 12"/>
+            </svg>
+            Kick Strobe
+          </div>
+          <button class="btn btn-sm" onclick="loadAudioDevices()">Refresh Devices</button>
+        </div>
+        <div class="panel-body">
+
+          <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
+            Flashes all fixtures white on every kick drum hit. Feed the kick mic to this machine
+            on an audio input channel — e.g. patch it to a Dante Virtual Soundcard channel from
+            the console — then pick the device and channel below. Set the threshold so the red
+            marker sits above the bleed but below the kick peaks on the live meter.
+            Enable/disable with the sidebar button or the webhooks in the Test tab.
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Audio Input Device</label>
+              <select id="kick-device" onchange="markDirty()">
+                <option value="">System default input</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Channel # (1-based, e.g. kick mic channel)</label>
+              <input type="number" id="kick-channel" min="1" max="256"
+                value="{{ config.get('kick_strobe', {}).get('channel', 1) }}" oninput="markDirty()">
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Input Level &amp; Trigger Threshold</label>
+            <div style="position:relative;height:20px;background:var(--bg);border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:8px">
+              <div id="kick-meter-bar" style="position:absolute;left:0;top:0;bottom:0;width:0%;background:var(--green);transition:width 80ms linear"></div>
+              <div id="kick-thresh-marker" style="position:absolute;top:0;bottom:0;width:2px;background:var(--red);left:{{ (config.get('kick_strobe', {}).get('threshold', 0.5) * 100)|int }}%"></div>
+            </div>
+            <div class="range-field">
+              <input type="range" min="1" max="100" id="kick-threshold"
+                value="{{ (config.get('kick_strobe', {}).get('threshold', 0.5) * 100)|int }}"
+                oninput="this.nextElementSibling.textContent=this.value+'%'; document.getElementById('kick-thresh-marker').style.left=this.value+'%'; markDirty()">
+              <span class="range-val">{{ (config.get('kick_strobe', {}).get('threshold', 0.5) * 100)|int }}%</span>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Flash Duration (ms)</label>
+              <input type="number" id="kick-flash-ms" min="20" max="500"
+                value="{{ config.get('kick_strobe', {}).get('flash_ms', 60) }}" oninput="markDirty()">
+            </div>
+            <div class="field">
+              <label>Debounce (ms — min gap between hits)</label>
+              <input type="number" id="kick-debounce" min="50" max="1000"
+                value="{{ config.get('kick_strobe', {}).get('debounce_ms', 150) }}" oninput="markDirty()">
+            </div>
+          </div>
+
+          <div id="kick-status" style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px">
+            Kick strobe disabled.
+          </div>
+
+        </div>
+      </div>
+    </div>
+
     <!-- ZONE EDITOR TAB -->
     <div class="tab-content" id="tab-zones">
       <div class="panel">
@@ -858,6 +933,7 @@ const fixtureTypes = {{ fixture_types | tojson }};
 document.addEventListener('DOMContentLoaded', () => {
   if (!config.bars) config.bars = [];
   if (!config.static_controls) config.static_controls = [];
+  if (!config.kick_strobe) config.kick_strobe = { device: '', channel: 1, threshold: 0.5, debounce_ms: 150, flash_ms: 60 };
   renderFixtures();
   renderBars();
   renderStaticControls();
@@ -867,6 +943,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initZoneCanvas();
   loadMonitors();
   loadWebhooks();
+  loadAudioDevices();
+  pollKickMeter();
 });
 
 // ---- WEBHOOKS ----
@@ -888,6 +966,9 @@ async function loadWebhooks() {
     { label: 'Fog On', path: '/hook/fog-on', colour: 'var(--green)', desc: 'Turns hazer/fog static controls on' },
     { label: 'Fog Off', path: '/hook/fog-off', colour: 'var(--red)', desc: 'Turns hazer/fog static controls off' },
     { label: 'Toggle Fog', path: '/hook/fog-toggle', colour: 'var(--accent)', desc: 'Single button — flips fog on/off' },
+    { label: 'Kick Strobe On', path: '/hook/kick-strobe-on', colour: 'var(--green)', desc: 'Enables flash-on-kick (opens audio input)' },
+    { label: 'Kick Strobe Off', path: '/hook/kick-strobe-off', colour: 'var(--red)', desc: 'Disables flash-on-kick' },
+    { label: 'Toggle Kick Strobe', path: '/hook/kick-strobe-toggle', colour: 'var(--accent)', desc: 'Single button — flips kick strobe on/off' },
   ];
 
   const list = document.getElementById('webhook-list');
@@ -978,6 +1059,14 @@ function updateStatus(s) {
       fogBtn.style.cssText = 'width:100%;justify-content:center;padding:10px';
     }
   }
+
+  // Kick strobe button — label shows the action, not the state
+  const kickBtn = document.getElementById('kick-btn');
+  if (kickBtn) {
+    kickBtn.textContent = s.kick_enabled ? 'Disable Kick Strobe' : 'Enable Kick Strobe';
+    kickBtn.className = 'btn ' + (s.kick_enabled ? 'btn-red' : 'btn-green');
+    kickBtn.style.cssText = 'width:100%;justify-content:center;padding:10px';
+  }
 }
 
 // ---- BRIDGE CONTROLS ----
@@ -1009,10 +1098,66 @@ async function toggleFog() {
   toast(d.fog_enabled ? 'Fog on' : 'Fog off', 'success');
 }
 
+// ---- KICK STROBE ----
+async function toggleKick() {
+  if (dirty) await saveConfig(true);  // apply device/threshold edits first
+  const r = await fetch('/api/kick-toggle', { method: 'POST' });
+  const d = await r.json();
+  if (d.kick_enabled) toast('Kick strobe enabled — flashing on hits', 'success');
+  else if (d.error) toast('Kick strobe: ' + d.error, 'error');
+  else toast('Kick strobe disabled', 'success');
+}
+
+async function loadAudioDevices() {
+  const sel = document.getElementById('kick-device');
+  if (!sel) return;
+  try {
+    const r = await fetch('/api/audio-devices');
+    const d = await r.json();
+    sel.innerHTML = '<option value="">System default input</option>';
+    (d.devices || []).forEach(dev => {
+      const opt = document.createElement('option');
+      opt.value = dev.name;
+      opt.textContent = `${dev.name} (${dev.channels} ch)`;
+      sel.appendChild(opt);
+    });
+    const saved = (config.kick_strobe || {}).device || '';
+    if (saved) {
+      const match = [...sel.options].find(o => o.value.toLowerCase().includes(saved.toLowerCase()));
+      if (match) sel.value = match.value;
+    }
+    if (d.error) {
+      document.getElementById('kick-status').textContent = d.error;
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function pollKickMeter() {
+  setInterval(async () => {
+    const tab = document.getElementById('tab-kick');
+    if (!tab || !tab.classList.contains('active')) return;
+    try {
+      const r = await fetch('/api/kick-meter');
+      const d = await r.json();
+      const bar = document.getElementById('kick-meter-bar');
+      if (bar) {
+        bar.style.width = Math.min(100, d.level * 100).toFixed(1) + '%';
+        bar.style.background = d.level >= d.threshold ? 'var(--red)' : 'var(--green)';
+      }
+      const status = document.getElementById('kick-status');
+      if (status) {
+        if (d.error) status.textContent = 'Error: ' + d.error;
+        else if (d.enabled) status.textContent = `Listening — ${d.hits} hits detected`;
+        else status.textContent = 'Kick strobe disabled — enable it to see the live level.';
+      }
+    } catch (e) { /* ignore */ }
+  }, 150);
+}
+
 // ---- TABS ----
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t, i) => {
-    const tabs = ['fixtures', 'bars', 'static', 'zones', 'test'];
+    const tabs = ['fixtures', 'bars', 'static', 'kick', 'zones', 'test'];
     t.classList.toggle('active', tabs[i] === name);
   });
   document.querySelectorAll('.tab-content').forEach(c => {
@@ -1040,6 +1185,13 @@ async function saveConfig(silent = false) {
   config.min_brightness = parseInt(document.getElementById('min_brightness').value);
   config.min_output = parseInt(document.getElementById('min_output').value);
   config.stage_floor_pct = parseInt(document.getElementById('stage_floor_pct').value);
+  config.kick_strobe = {
+    device: document.getElementById('kick-device').value,
+    channel: parseInt(document.getElementById('kick-channel').value) || 1,
+    threshold: parseInt(document.getElementById('kick-threshold').value) / 100,
+    flash_ms: parseInt(document.getElementById('kick-flash-ms').value) || 60,
+    debounce_ms: parseInt(document.getElementById('kick-debounce').value) || 150,
+  };
 
   await fetch('/api/config', {
     method: 'POST',

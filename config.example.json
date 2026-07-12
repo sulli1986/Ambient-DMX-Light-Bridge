@@ -8,6 +8,13 @@
   "colour_boost": 4.0,
   "white_mode": "min",
   "master_brightness": 255,
+  "kick_strobe": {
+    "device": "Dante",
+    "channel": 5,
+    "threshold": 0.5,
+    "debounce_ms": 150,
+    "flash_ms": 60
+  },
   "fixtures": [
     {
       "name": "P1",

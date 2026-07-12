@@ -43,7 +43,14 @@ DEFAULT_CONFIG = {
     "stage_floor_pct": 50,
     "fixtures": [],
     "bars": [],
-    "static_controls": []
+    "static_controls": [],
+    "kick_strobe": {
+        "device": "",        # input device name substring, e.g. "Dante"
+        "channel": 1,        # 1-based input channel carrying the kick mic
+        "threshold": 0.5,    # peak level (0-1) that counts as a hit
+        "debounce_ms": 150,  # minimum gap between hits
+        "flash_ms": 60       # how long fixtures hold the flash
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -426,6 +433,138 @@ def sample_zone(img_array, zone, grid_x=16, grid_y=10):
 
 
 # ---------------------------------------------------------------------------
+# KICK DETECTOR — audio input (e.g. Dante Virtual Soundcard channel)
+# ---------------------------------------------------------------------------
+
+class KickDetector:
+    """
+    Listens to one channel of an audio input device (e.g. the kick mic
+    arriving on a Dante Virtual Soundcard channel) and fires a callback on
+    each hit. A simple peak detector with hysteresis + debounce — reliable
+    on an isolated kick channel, not a general beat tracker.
+    """
+
+    def __init__(self, on_kick):
+        self.on_kick = on_kick
+        self.stream = None
+        self.active = False
+        self.error = None
+        self.level = 0.0      # decaying peak, for the UI meter
+        self.hits = 0
+        self.threshold = 0.5
+        self.debounce_s = 0.15
+        self.channel = 1
+        self._armed = True
+        self._last_hit = 0.0
+        self._hit_event = threading.Event()
+
+    @staticmethod
+    def list_devices():
+        """Return available audio input devices, or an error message."""
+        try:
+            import sounddevice as sd
+        except Exception:
+            return {"error": "sounddevice not installed — run: pip install sounddevice",
+                    "devices": []}
+        try:
+            devices = [
+                {"index": i, "name": d["name"],
+                 "channels": d["max_input_channels"]}
+                for i, d in enumerate(sd.query_devices())
+                if d.get("max_input_channels", 0) > 0
+            ]
+            return {"error": None, "devices": devices}
+        except Exception as e:
+            return {"error": str(e), "devices": []}
+
+    def start(self, device, channel, threshold, debounce_ms):
+        self.stop()
+        self.error = None
+        self.threshold = float(threshold)
+        self.debounce_s = debounce_ms / 1000.0
+        self.channel = max(1, int(channel))
+        try:
+            import sounddevice as sd
+        except Exception:
+            self.error = "sounddevice not installed — run: pip install sounddevice"
+            return False
+        try:
+            # Resolve device: index, name substring, or default input
+            dev = None
+            if isinstance(device, (int, float)):
+                dev = int(device)
+            elif isinstance(device, str) and device.strip():
+                if device.strip().isdigit():
+                    dev = int(device.strip())
+                else:
+                    for i, d in enumerate(sd.query_devices()):
+                        if (d.get("max_input_channels", 0) > 0
+                                and device.lower() in d["name"].lower()):
+                            dev = i
+                            break
+                    if dev is None:
+                        self.error = f'No input device matching "{device}"'
+                        return False
+            info = sd.query_devices(dev, "input") if dev is not None \
+                else sd.query_devices(kind="input")
+            max_ch = info.get("max_input_channels", 0)
+            if self.channel > max_ch:
+                self.error = (f'Channel {self.channel} not available — '
+                              f'"{info["name"]}" has {max_ch} input channels')
+                return False
+            # Open channels 1..N so the selected channel is the last column
+            self.stream = sd.InputStream(
+                device=dev, channels=self.channel,
+                blocksize=256, callback=self._audio_cb
+            )
+            self.stream.start()
+        except Exception as e:
+            self.error = f"Audio input failed: {e}"
+            self.stream = None
+            return False
+        self.active = True
+        threading.Thread(target=self._dispatch, daemon=True).start()
+        log.info(f'Kick detector listening on "{info["name"]}" ch {self.channel}')
+        return True
+
+    def stop(self):
+        self.active = False
+        if self.stream:
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None
+        self.level = 0.0
+        self._armed = True
+
+    def _audio_cb(self, indata, frames, t, status):
+        peak = float(np.max(np.abs(indata[:, self.channel - 1])))
+        # Decaying peak so the UI meter is readable
+        self.level = max(peak, self.level * 0.92)
+        now = time.monotonic()
+        if (self._armed and peak >= self.threshold
+                and (now - self._last_hit) >= self.debounce_s):
+            self._armed = False
+            self._last_hit = now
+            self.hits += 1
+            self._hit_event.set()
+        elif not self._armed and peak < self.threshold * 0.5:
+            self._armed = True
+
+    def _dispatch(self):
+        # OSC sends happen here, off the PortAudio callback thread
+        while self.active:
+            if self._hit_event.wait(0.2):
+                self._hit_event.clear()
+                try:
+                    self.on_kick()
+                except Exception as e:
+                    log.warning(f"Kick flash failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # BRIDGE ENGINE
 # ---------------------------------------------------------------------------
 
@@ -442,6 +581,9 @@ class BridgeEngine:
         self.status = "stopped"
         self.fps_actual = 0
         self._last_bright = (200, 180, 120)
+        self.kick_enabled = False
+        self.flash_until = 0.0
+        self.kick = KickDetector(on_kick=self._on_kick)
 
     def _load_config(self):
         if CONFIG_FILE.exists():
@@ -458,6 +600,9 @@ class BridgeEngine:
         self.config = cfg
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg, f, indent=2)
+        # Restart the kick detector so device/threshold changes apply live
+        if self.kick_enabled:
+            self.set_kick_strobe(True)
 
     def start(self):
         if self.running:
@@ -512,6 +657,37 @@ class BridgeEngine:
         except Exception as e:
             log.warning(f"Fog toggle send failed: {e}")
         return self.fog_enabled
+
+    def toggle_kick_strobe(self):
+        return self.set_kick_strobe(not self.kick_enabled)
+
+    def set_kick_strobe(self, enabled):
+        ks = self.config.get("kick_strobe", {})
+        if enabled:
+            self.kick_enabled = self.kick.start(
+                device=ks.get("device", ""),
+                channel=ks.get("channel", 1),
+                threshold=ks.get("threshold", 0.5),
+                debounce_ms=ks.get("debounce_ms", 150),
+            )
+        else:
+            self.kick.stop()
+            self.kick_enabled = False
+            self.flash_until = 0.0
+        return self.kick_enabled
+
+    def _on_kick(self):
+        """Fired per kick hit (from the detector's dispatch thread):
+        flash all fixtures white immediately, without waiting for the
+        frame loop, then let ambient colours resume after flash_ms."""
+        if not (self.running and self.enabled and self.kick_enabled and self.osc):
+            return
+        flash_ms = self.config.get("kick_strobe", {}).get("flash_ms", 60)
+        self.flash_until = time.time() + flash_ms / 1000.0
+        for fx in self._get_all_fixtures():
+            self.osc.send_fixture(
+                fx["name"], rgb_to_channels(255, 255, 255, fx["type"])
+            )
 
     def toggle(self):
         self.enabled = not self.enabled
@@ -657,7 +833,9 @@ class BridgeEngine:
             # Convert smoothed values to fixture channels
             channels = rgb_to_channels(smooth_r, smooth_g, smooth_b, fx_type)
 
-            if self.enabled and self.osc:
+            # During a kick flash the white values were already sent from the
+            # detector thread — hold off so ambient doesn't overwrite them.
+            if self.enabled and self.osc and time.time() >= self.flash_until:
                 self.osc.send_fixture(name, channels)
 
     def _run(self):
@@ -703,6 +881,9 @@ class BridgeEngine:
             "bar_count": len(self.config.get("bars", [])),
             "total_count": len(self._get_all_fixtures()) if hasattr(self, "capture") else 0,
             "static_count": len(self.config.get("static_controls", [])),
+            "kick_enabled": self.kick_enabled,
+            "kick_hits": self.kick.hits,
+            "kick_error": self.kick.error,
         }
 
 
@@ -771,6 +952,9 @@ def api_toggle():
 #   http://<bridge-ip>:5000/hook/fog-on
 #   http://<bridge-ip>:5000/hook/fog-off
 #   http://<bridge-ip>:5000/hook/fog-toggle
+#   http://<bridge-ip>:5000/hook/kick-strobe-on
+#   http://<bridge-ip>:5000/hook/kick-strobe-off
+#   http://<bridge-ip>:5000/hook/kick-strobe-toggle
 # ---------------------------------------------------------------------------
 
 @app.route("/hook/pause", methods=["GET", "POST"])
@@ -832,6 +1016,29 @@ def hook_fog_toggle():
     """Flip hazer/fog on/off — single button that toggles state."""
     enabled = engine.toggle_fog()
     return jsonify({"fog_enabled": enabled, "action": "fog-toggle"})
+
+
+@app.route("/hook/kick-strobe-on", methods=["GET", "POST"])
+def hook_kick_on():
+    """Enable kick-triggered strobe (opens the audio input)."""
+    enabled = engine.set_kick_strobe(True)
+    return jsonify({"kick_enabled": enabled, "error": engine.kick.error,
+                    "action": "kick-strobe-on"})
+
+
+@app.route("/hook/kick-strobe-off", methods=["GET", "POST"])
+def hook_kick_off():
+    """Disable kick-triggered strobe (closes the audio input)."""
+    enabled = engine.set_kick_strobe(False)
+    return jsonify({"kick_enabled": enabled, "action": "kick-strobe-off"})
+
+
+@app.route("/hook/kick-strobe-toggle", methods=["GET", "POST"])
+def hook_kick_toggle():
+    """Flip kick strobe on/off — single button that toggles state."""
+    enabled = engine.toggle_kick_strobe()
+    return jsonify({"kick_enabled": enabled, "error": engine.kick.error,
+                    "action": "kick-strobe-toggle"})
 
 
 @app.route("/hook/status", methods=["GET"])
@@ -967,6 +1174,30 @@ def api_bar_positions():
 def api_fog_toggle():
     enabled = engine.toggle_fog()
     return jsonify({"fog_enabled": enabled})
+
+
+@app.route("/api/kick-toggle", methods=["POST"])
+def api_kick_toggle():
+    enabled = engine.toggle_kick_strobe()
+    return jsonify({"kick_enabled": enabled, "error": engine.kick.error})
+
+
+@app.route("/api/audio-devices")
+def api_audio_devices():
+    return jsonify(KickDetector.list_devices())
+
+
+@app.route("/api/kick-meter")
+def api_kick_meter():
+    """Live input level + hit count — used by the UI to calibrate the threshold."""
+    ks = engine.config.get("kick_strobe", {})
+    return jsonify({
+        "enabled": engine.kick_enabled,
+        "level": round(engine.kick.level, 4),
+        "threshold": ks.get("threshold", 0.5),
+        "hits": engine.kick.hits,
+        "error": engine.kick.error,
+    })
 
 
 @app.route("/api/static-controls", methods=["GET"])

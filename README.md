@@ -338,10 +338,43 @@ Test tab for the URLs with your machine's IP filled in.
 | `http://<ip>:5000/hook/fog-on` | Turn hazer/fog static controls on |
 | `http://<ip>:5000/hook/fog-off` | Turn hazer/fog static controls off |
 | `http://<ip>:5000/hook/fog-toggle` | Flip fog on/off (single button) |
+| `http://<ip>:5000/hook/kick-strobe-on` | Enable flash-on-kick (opens audio input) |
+| `http://<ip>:5000/hook/kick-strobe-off` | Disable flash-on-kick |
+| `http://<ip>:5000/hook/kick-strobe-toggle` | Flip kick strobe on/off (single button) |
 | `http://<ip>:5000/hook/status` | Return current state as JSON |
 
 **Stream Deck setup:** add a **Website** action, paste the URL, and enable
 "Access in background" so it fires without opening a browser.
+
+---
+
+## Kick Strobe (Dante / audio input)
+
+Flashes every fixture white on each kick drum hit, then returns to ambient
+pixel colours. Designed for an isolated kick channel arriving over
+**Dante Virtual Soundcard** (any audio input device works).
+
+Setup:
+
+1. Patch the kick mic to a DVS channel from your console (a direct out or
+   an aux send works well).
+2. Open the **Kick Strobe** tab, pick the Dante device and enter the channel
+   number the kick arrives on.
+3. Enable kick strobe (sidebar button or `/hook/kick-strobe-on`), have the
+   drummer play, and watch the live level meter: set the **threshold** so the
+   red marker sits above the bleed but below the kick peaks.
+4. Tune **debounce** (minimum gap between flashes — stops doubles from fast
+   kick patterns) and **flash duration** to taste.
+
+The detector is a simple peak trigger with hysteresis — it relies on the
+channel being an isolated kick mic, not a full mix. Enable/disable it live
+from the sidebar button, a Stream Deck key (`/hook/kick-strobe-toggle`), or
+the on/off webhooks above. Flashes only fire while the bridge is running and
+not paused; the audio input stays open so hit detection (and the meter) keep
+working for calibration.
+
+> ⚠️ This is a strobe effect — be deliberate about where and how long you
+> run it, and keep photosensitivity in mind for your audience.
 
 ---
 
