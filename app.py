@@ -496,7 +496,10 @@ class BridgeEngine:
         log.info("Bridge stopped, overrides cleared.")
 
     def toggle_fog(self):
-        self.fog_enabled = not self.fog_enabled
+        return self.set_fog(not self.fog_enabled)
+
+    def set_fog(self, enabled):
+        self.fog_enabled = enabled
         try:
             osc = LightkeyOSC(self.config["lightkey_host"], self.config["lightkey_port"])
             for sc in self.config.get("static_controls", []):
@@ -765,6 +768,9 @@ def api_toggle():
 #   http://<bridge-ip>:5000/hook/toggle
 #   http://<bridge-ip>:5000/hook/start
 #   http://<bridge-ip>:5000/hook/stop
+#   http://<bridge-ip>:5000/hook/fog-on
+#   http://<bridge-ip>:5000/hook/fog-off
+#   http://<bridge-ip>:5000/hook/fog-toggle
 # ---------------------------------------------------------------------------
 
 @app.route("/hook/pause", methods=["GET", "POST"])
@@ -805,6 +811,27 @@ def hook_stop():
     """Stop the bridge and clear all overrides."""
     engine.stop()
     return jsonify({"running": engine.running, "action": "stop"})
+
+
+@app.route("/hook/fog-on", methods=["GET", "POST"])
+def hook_fog_on():
+    """Turn hazer/fog static controls on."""
+    enabled = engine.set_fog(True)
+    return jsonify({"fog_enabled": enabled, "action": "fog-on"})
+
+
+@app.route("/hook/fog-off", methods=["GET", "POST"])
+def hook_fog_off():
+    """Turn hazer/fog static controls off."""
+    enabled = engine.set_fog(False)
+    return jsonify({"fog_enabled": enabled, "action": "fog-off"})
+
+
+@app.route("/hook/fog-toggle", methods=["GET", "POST"])
+def hook_fog_toggle():
+    """Flip hazer/fog on/off — single button that toggles state."""
+    enabled = engine.toggle_fog()
+    return jsonify({"fog_enabled": enabled, "action": "fog-toggle"})
 
 
 @app.route("/hook/status", methods=["GET"])

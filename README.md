@@ -335,6 +335,9 @@ Test tab for the URLs with your machine's IP filled in.
 | `http://<ip>:5000/hook/resume` | Resume ambient control |
 | `http://<ip>:5000/hook/start` | Start the bridge |
 | `http://<ip>:5000/hook/stop` | Stop and clear overrides |
+| `http://<ip>:5000/hook/fog-on` | Turn hazer/fog static controls on |
+| `http://<ip>:5000/hook/fog-off` | Turn hazer/fog static controls off |
+| `http://<ip>:5000/hook/fog-toggle` | Flip fog on/off (single button) |
 | `http://<ip>:5000/hook/status` | Return current state as JSON |
 
 **Stream Deck setup:** add a **Website** action, paste the URL, and enable

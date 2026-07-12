@@ -435,7 +435,7 @@
           <button class="btn" id="toggle-btn" onclick="toggleBridge()" style="display:none">⏸ Pause</button>
         </div>
         <div id="fog-row" style="display:none;margin-top:8px">
-          <button class="btn" id="fog-btn" onclick="toggleFog()" style="width:100%;justify-content:center;padding:10px">Fog Off</button>
+          <button class="btn" id="fog-btn" onclick="toggleFog()" style="width:100%;justify-content:center;padding:10px">Toggle Fog</button>
         </div>
       </div>
     </div>
@@ -885,6 +885,9 @@ async function loadWebhooks() {
     { label: 'Resume', path: '/hook/resume', colour: 'var(--green)', desc: 'Resumes ambient control' },
     { label: 'Start', path: '/hook/start', colour: 'var(--green)', desc: 'Starts the bridge' },
     { label: 'Stop', path: '/hook/stop', colour: 'var(--red)', desc: 'Stops and clears all overrides' },
+    { label: 'Fog On', path: '/hook/fog-on', colour: 'var(--green)', desc: 'Turns hazer/fog static controls on' },
+    { label: 'Fog Off', path: '/hook/fog-off', colour: 'var(--red)', desc: 'Turns hazer/fog static controls off' },
+    { label: 'Toggle Fog', path: '/hook/fog-toggle', colour: 'var(--accent)', desc: 'Single button — flips fog on/off' },
   ];
 
   const list = document.getElementById('webhook-list');
@@ -969,8 +972,9 @@ function updateStatus(s) {
     const showFog = s.running && s.enabled && s.static_count > 0;
     fogRow.style.display = showFog ? '' : 'none';
     if (showFog) {
-      fogBtn.textContent = s.fog_enabled ? 'Fog On' : 'Fog Off';
-      fogBtn.className = 'btn ' + (s.fog_enabled ? 'btn-green' : 'btn-red');
+      // Label shows the action the button will perform, not the current state
+      fogBtn.textContent = s.fog_enabled ? 'Turn Fog Off' : 'Turn Fog On';
+      fogBtn.className = 'btn ' + (s.fog_enabled ? 'btn-red' : 'btn-green');
       fogBtn.style.cssText = 'width:100%;justify-content:center;padding:10px';
     }
   }
