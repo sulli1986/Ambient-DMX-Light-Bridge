@@ -366,6 +366,20 @@ Setup:
 4. Tune **debounce** (minimum gap between flashes — stops doubles from fast
    kick patterns) and **flash duration** to taste.
 
+**Dante device not listed?** Dante Virtual Soundcard must be *started* (not
+just installed) before it exists as an audio device, then click **Refresh
+Devices** in the Kick Strobe tab (re-scans without restarting the app).
+
+- **Windows:** set DVS to **WDM mode** in its control panel — ASIO-mode
+  devices are invisible to the bridge. In WDM mode DVS appears as stereo
+  pairs (*DVS Receive 1-2*, *3-4*, …): in Dante Controller route the kick to
+  a DVS receive channel, select that pair as the device, and set Channel to
+  1 or 2 within the pair. Also check Settings → Privacy → Microphone allows
+  desktop apps.
+- **macOS:** DVS should appear in **Audio MIDI Setup**; allow the microphone
+  permission prompt the first time the strobe is enabled (System Settings →
+  Privacy & Security → Microphone).
+
 The detector is a simple peak trigger with hysteresis — it relies on the
 channel being an isolated kick mic, not a full mix. Enable/disable it live
 from the sidebar button, a Stream Deck key (`/hook/kick-strobe-toggle`), or

@@ -781,6 +781,15 @@
             the console — then pick the device and channel below. Set the threshold so the red
             marker sits above the bleed but below the kick peaks on the live meter.
             Enable/disable with the sidebar button or the webhooks in the Test tab.
+            <br><br>
+            Device missing from the list? Dante Virtual Soundcard must be <b>started</b>
+            (not just installed). On Windows, set DVS to <b>WDM mode</b> in its control
+            panel — ASIO-mode devices are invisible to the bridge. WDM exposes DVS as
+            stereo pairs (<span style="font-family:var(--mono);color:var(--accent)">DVS Receive 1-2</span>,
+            <span style="font-family:var(--mono);color:var(--accent)">3-4</span>, …), so select the
+            pair the kick is routed to and set Channel to <b>1 or 2</b> within it.
+            Then click <b>Refresh Devices</b> and check OS microphone permission if the
+            level meter stays flat.
           </div>
 
           <div class="field-row">

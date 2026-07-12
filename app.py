@@ -459,13 +459,28 @@ class KickDetector:
         self._hit_event = threading.Event()
 
     @staticmethod
-    def list_devices():
+    def _rescan():
+        """PortAudio snapshots the device list when it initialises, so inputs
+        that appeared since (e.g. Dante Virtual Soundcard started after this
+        app) are invisible until it re-initialises. Only call while no
+        stream is open — re-init kills active streams."""
+        try:
+            import sounddevice as sd
+            sd._terminate()
+            sd._initialize()
+        except Exception:
+            pass
+
+    @staticmethod
+    def list_devices(rescan=False):
         """Return available audio input devices, or an error message."""
         try:
             import sounddevice as sd
         except Exception:
             return {"error": "sounddevice not installed — run: pip install sounddevice",
                     "devices": []}
+        if rescan:
+            KickDetector._rescan()
         try:
             devices = [
                 {"index": i, "name": d["name"],
@@ -488,6 +503,8 @@ class KickDetector:
         except Exception:
             self.error = "sounddevice not installed — run: pip install sounddevice"
             return False
+        # Safe here — stop() above means no stream is open
+        self._rescan()
         try:
             # Resolve device: index, name substring, or default input
             dev = None
@@ -1184,7 +1201,9 @@ def api_kick_toggle():
 
 @app.route("/api/audio-devices")
 def api_audio_devices():
-    return jsonify(KickDetector.list_devices())
+    # Re-scan for new devices unless the detector's stream is live
+    # (re-initialising PortAudio would kill it)
+    return jsonify(KickDetector.list_devices(rescan=not engine.kick.active))
 
 
 @app.route("/api/kick-meter")
