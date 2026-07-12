@@ -820,6 +820,16 @@
             </div>
           </div>
 
+          <div class="field">
+            <label>Input Gain (boosts a quiet channel before the meter &amp; trigger)</label>
+            <div class="range-field">
+              <input type="range" min="1" max="100" id="kick-gain"
+                value="{{ config.get('kick_strobe', {}).get('gain', 1.0)|int }}"
+                oninput="this.nextElementSibling.textContent='×'+this.value; markDirty()">
+              <span class="range-val">×{{ config.get('kick_strobe', {}).get('gain', 1.0)|int }}</span>
+            </div>
+          </div>
+
           <div class="field-row">
             <div class="field">
               <label>Flash Duration (ms)</label>
@@ -942,7 +952,7 @@ const fixtureTypes = {{ fixture_types | tojson }};
 document.addEventListener('DOMContentLoaded', () => {
   if (!config.bars) config.bars = [];
   if (!config.static_controls) config.static_controls = [];
-  if (!config.kick_strobe) config.kick_strobe = { device: '', channel: 1, threshold: 0.5, debounce_ms: 150, flash_ms: 60 };
+  if (!config.kick_strobe) config.kick_strobe = { device: '', channel: 1, threshold: 0.5, gain: 1, debounce_ms: 150, flash_ms: 60 };
   renderFixtures();
   renderBars();
   renderStaticControls();
@@ -1198,6 +1208,7 @@ async function saveConfig(silent = false) {
     device: document.getElementById('kick-device').value,
     channel: parseInt(document.getElementById('kick-channel').value) || 1,
     threshold: parseInt(document.getElementById('kick-threshold').value) / 100,
+    gain: parseInt(document.getElementById('kick-gain').value) || 1,
     flash_ms: parseInt(document.getElementById('kick-flash-ms').value) || 60,
     debounce_ms: parseInt(document.getElementById('kick-debounce').value) || 150,
   };

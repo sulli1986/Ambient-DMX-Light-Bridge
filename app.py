@@ -48,6 +48,7 @@ DEFAULT_CONFIG = {
         "device": "",        # input device name substring, e.g. "Dante"
         "channel": 1,        # 1-based input channel carrying the kick mic
         "threshold": 0.5,    # peak level (0-1) that counts as a hit
+        "gain": 1.0,         # input boost (×) applied before the meter/trigger
         "debounce_ms": 150,  # minimum gap between hits
         "flash_ms": 60       # how long fixtures hold the flash
     }
@@ -452,6 +453,7 @@ class KickDetector:
         self.level = 0.0      # decaying peak, for the UI meter
         self.hits = 0
         self.threshold = 0.5
+        self.gain = 1.0
         self.debounce_s = 0.15
         self.channel = 1
         self._armed = True
@@ -492,10 +494,11 @@ class KickDetector:
         except Exception as e:
             return {"error": str(e), "devices": []}
 
-    def start(self, device, channel, threshold, debounce_ms):
+    def start(self, device, channel, threshold, debounce_ms, gain=1.0):
         self.stop()
         self.error = None
         self.threshold = float(threshold)
+        self.gain = max(1.0, float(gain))
         self.debounce_s = debounce_ms / 1000.0
         self.channel = max(1, int(channel))
         try:
@@ -557,7 +560,7 @@ class KickDetector:
         self._armed = True
 
     def _audio_cb(self, indata, frames, t, status):
-        peak = float(np.max(np.abs(indata[:, self.channel - 1])))
+        peak = min(1.0, float(np.max(np.abs(indata[:, self.channel - 1]))) * self.gain)
         # Decaying peak so the UI meter is readable
         self.level = max(peak, self.level * 0.92)
         now = time.monotonic()
@@ -686,6 +689,7 @@ class BridgeEngine:
                 channel=ks.get("channel", 1),
                 threshold=ks.get("threshold", 0.5),
                 debounce_ms=ks.get("debounce_ms", 150),
+                gain=ks.get("gain", 1.0),
             )
         else:
             self.kick.stop()

@@ -363,7 +363,9 @@ Setup:
 3. Enable kick strobe (sidebar button or `/hook/kick-strobe-on`), have the
    drummer play, and watch the live level meter: set the **threshold** so the
    red marker sits above the bleed but below the kick peaks.
-4. Tune **debounce** (minimum gap between flashes — stops doubles from fast
+4. If the channel arrives quiet and the meter barely moves, raise **input
+   gain** (×1–×100) until kick peaks reach mid-meter, then set the threshold.
+5. Tune **debounce** (minimum gap between flashes — stops doubles from fast
    kick patterns) and **flash duration** to taste.
 
 **Dante device not listed?** Dante Virtual Soundcard must be *started* (not

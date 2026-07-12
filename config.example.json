@@ -12,6 +12,7 @@
     "device": "Dante",
     "channel": 5,
     "threshold": 0.5,
+    "gain": 1.0,
     "debounce_ms": 150,
     "flash_ms": 60
   },
