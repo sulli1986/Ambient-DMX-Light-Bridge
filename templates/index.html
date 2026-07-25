@@ -525,6 +525,24 @@
       </div>
     </div>
 
+    <div>
+      <div class="section-title">Tempo</div>
+      <div class="field">
+        <label>BPM <span id="bpm-display">{{ config.get('tempo', {}).get('bpm', 120) }}</span></label>
+        <div class="range-field">
+          <input type="range" min="40" max="240" id="bpm_slider" value="{{ config.get('tempo', {}).get('bpm', 120) }}"
+            oninput="document.getElementById('bpm-display').textContent=this.value; setBpm(this.value)">
+          <span class="range-val" id="bpm-val">{{ config.get('tempo', {}).get('bpm', 120) }}</span>
+        </div>
+      </div>
+      <button class="btn" style="width:100%" onclick="tapTempo()">Tap Tempo</button>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="btn btn-sm btn-red" style="flex:1" onclick="doBlackout(0)">Blackout</button>
+        <button class="btn btn-sm" style="flex:1" onclick="doBlackout(1000)">Fade Out</button>
+        <button class="btn btn-sm btn-green" style="flex:1" onclick="restoreBlackout()">Restore</button>
+      </div>
+    </div>
+
   </aside>
 
   <!-- MAIN CONTENT -->
@@ -533,8 +551,12 @@
     <div class="tabs">
       <div class="tab active" onclick="switchTab('fixtures')">Fixtures</div>
       <div class="tab" onclick="switchTab('bars')">Light Bars</div>
+      <div class="tab" onclick="switchTab('groups')">Groups</div>
+      <div class="tab" onclick="switchTab('effects')">Effects</div>
+      <div class="tab" onclick="switchTab('scenes')">Scenes</div>
       <div class="tab" onclick="switchTab('static')">Static Controls</div>
       <div class="tab" onclick="switchTab('kick')">Kick Strobe</div>
+      <div class="tab" onclick="switchTab('midi')">MIDI</div>
       <div class="tab" onclick="switchTab('zones')">Zone Editor</div>
       <div class="tab" onclick="switchTab('test')">Test</div>
     </div>
@@ -678,6 +700,93 @@
             </div>
           </div>
 
+        </div>
+      </div>
+    </div>
+
+    <!-- GROUPS TAB -->
+    <div class="tab-content" id="tab-groups">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Fixture Groups</div>
+          <button class="btn btn-sm btn-primary" onclick="showAddGroup()">+ Add Group</button>
+        </div>
+        <div class="panel-body">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+            Groups are the unit effects, solo, and moments target. Order fixtures left→right for chase/wipe direction.
+            Enable <strong>mirror</strong> for symmetric looks.
+          </div>
+          <div id="groups-list" class="fixture-list"></div>
+          <div id="add-group-form" style="display:none;margin-top:16px;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
+            <div class="field-row">
+              <div class="field"><label>Name</label><input id="grp-name" placeholder="e.g. Front Wash"></div>
+              <div class="field"><label>Mirror</label>
+                <select id="grp-mirror"><option value="0">Off</option><option value="1">On</option></select>
+              </div>
+            </div>
+            <div class="field"><label>Fixtures (ordered)</label>
+              <div id="grp-fixture-checks" style="display:flex;flex-wrap:wrap;gap:8px;max-height:160px;overflow:auto"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-primary btn-sm" onclick="addGroup()">Save Group</button>
+              <button class="btn btn-sm" onclick="document.getElementById('add-group-form').style.display='none'">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EFFECTS TAB -->
+    <div class="tab-content" id="tab-effects">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Effects</div>
+          <button class="btn btn-sm btn-red" onclick="clearEffects()">Clear All</button>
+        </div>
+        <div class="panel-body">
+          <div class="field-row" style="margin-bottom:12px">
+            <div class="field"><label>Target Group</label>
+              <select id="fx-group"><option value="">All fixtures</option></select>
+            </div>
+            <div class="field"><label>Active FX Intensity</label>
+              <div class="range-field">
+                <input type="range" min="0" max="100" value="100" id="fx-intensity"
+                  oninput="this.nextElementSibling.textContent=this.value+'%'; setFxParamGlobal('intensity', this.value/100)">
+                <span class="range-val">100%</span>
+              </div>
+            </div>
+          </div>
+          <div id="effect-buttons" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:16px"></div>
+          <div class="section-title">Running</div>
+          <div id="active-effects" style="font-size:13px;color:var(--muted)">None</div>
+          <div class="section-title" style="margin-top:16px">Spectrum</div>
+          <div id="spectrum-bars" style="display:flex;align-items:flex-end;gap:3px;height:48px;background:var(--bg);border-radius:6px;padding:6px;border:1px solid var(--border)"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCENES TAB -->
+    <div class="tab-content" id="tab-scenes">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">Scenes / Moments</div>
+          <button class="btn btn-sm btn-primary" onclick="snapshotScene()">Snapshot Current Look</button>
+        </div>
+        <div class="panel-body">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+            Capture the current stage look and recall it with a fade. Also available via webhooks and MIDI.
+          </div>
+          <div class="field-row" style="margin-bottom:12px">
+            <div class="field"><label>Solo Group</label>
+              <select id="solo-group" onchange="setSolo(this.value)">
+                <option value="">None</option>
+              </select>
+            </div>
+            <div class="field"><label>Scene Fade (ms)</label>
+              <input type="number" id="scene-fade-ms" value="500" min="0" max="10000">
+            </div>
+          </div>
+          <div id="scenes-list" class="fixture-list"></div>
         </div>
       </div>
     </div>
@@ -851,6 +960,38 @@
       </div>
     </div>
 
+    <!-- MIDI TAB -->
+    <div class="tab-content" id="tab-midi">
+      <div class="panel">
+        <div class="panel-header">
+          <div class="panel-title">MIDI Control</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm" onclick="loadMidiDevices()">Refresh</button>
+            <button class="btn btn-sm btn-green" onclick="startMidi()">Connect</button>
+            <button class="btn btn-sm btn-red" onclick="stopMidi()">Disconnect</button>
+          </div>
+        </div>
+        <div class="panel-body">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+            Map any MIDI note or CC to the same actions as webhooks. Click <strong>Learn</strong>, then move a control on your device.
+          </div>
+          <div class="field-row">
+            <div class="field"><label>MIDI Input</label>
+              <select id="midi-device"></select>
+            </div>
+            <div class="field"><label>Status</label>
+              <div id="midi-status" style="font-family:var(--mono);font-size:12px;padding:8px 0;color:var(--muted)">Disconnected</div>
+            </div>
+          </div>
+          <div id="midi-last" style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:12px"></div>
+          <div class="section-title">Mappings</div>
+          <div id="midi-mappings" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px"></div>
+          <div class="section-title">Learn an Action</div>
+          <div id="midi-actions" style="display:flex;flex-direction:column;gap:4px;max-height:320px;overflow:auto"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- ZONE EDITOR TAB -->
     <div class="tab-content" id="tab-zones">
       <div class="panel">
@@ -952,18 +1093,30 @@ const fixtureTypes = {{ fixture_types | tojson }};
 document.addEventListener('DOMContentLoaded', () => {
   if (!config.bars) config.bars = [];
   if (!config.static_controls) config.static_controls = [];
+  if (!config.groups) config.groups = [];
+  if (!config.scenes) config.scenes = [];
+  if (!config.tempo) config.tempo = { bpm: 120 };
+  if (!config.midi) config.midi = { device: '', enabled: false, mappings: [] };
   if (!config.kick_strobe) config.kick_strobe = { device: '', channel: 1, threshold: 0.5, gain: 1, debounce_ms: 150, flash_ms: 60 };
   renderFixtures();
   renderBars();
   renderStaticControls();
+  renderGroups();
   renderZoneFixtureSelect();
   renderIndividualTests();
+  renderEffectButtons();
+  refreshGroupSelects();
+  renderScenes();
   startPolling();
   initZoneCanvas();
   loadMonitors();
   loadWebhooks();
   loadAudioDevices();
+  loadMidiDevices();
+  loadMidiActions();
   pollKickMeter();
+  pollMidiState();
+  pollSpectrum();
 });
 
 // ---- WEBHOOKS ----
@@ -976,7 +1129,7 @@ async function loadWebhooks() {
   } catch (e) { /* fallback to localhost */ }
 
   const base = `http://${ip}:${port}`;
-  const hooks = [
+  let hooks = [
     { label: 'Toggle Pause/Resume', path: '/hook/toggle', colour: 'var(--accent)', desc: 'Single button — flips between paused and running' },
     { label: 'Pause', path: '/hook/pause', colour: 'var(--amber)', desc: 'Clears overrides, hands control to LD' },
     { label: 'Resume', path: '/hook/resume', colour: 'var(--green)', desc: 'Resumes ambient control' },
@@ -988,7 +1141,24 @@ async function loadWebhooks() {
     { label: 'Kick Strobe On', path: '/hook/kick-strobe-on', colour: 'var(--green)', desc: 'Enables flash-on-kick (opens audio input)' },
     { label: 'Kick Strobe Off', path: '/hook/kick-strobe-off', colour: 'var(--red)', desc: 'Disables flash-on-kick' },
     { label: 'Toggle Kick Strobe', path: '/hook/kick-strobe-toggle', colour: 'var(--accent)', desc: 'Single button — flips kick strobe on/off' },
+    { label: 'Tap Tempo', path: '/hook/tap-tempo', colour: 'var(--accent2)', desc: 'Tap to set BPM' },
+    { label: 'Clear Effects', path: '/hook/effect-clear', colour: 'var(--amber)', desc: 'Stop all running effects' },
+    { label: 'Blackout', path: '/hook/blackout', colour: 'var(--red)', desc: 'Instant blackout' },
+    { label: 'Fade to Black', path: '/hook/blackout-fade?fade_ms=1000', colour: 'var(--red)', desc: '1s fade to black' },
+    { label: 'Restore', path: '/hook/restore', colour: 'var(--green)', desc: 'Clear blackout / restore' },
   ];
+
+  // Append effect toggles + scene recalls from action registry
+  try {
+    const ar = await fetch('/api/actions');
+    const actions = await ar.json();
+    actions.filter(a => a.id.startsWith('effect_') && a.id.endsWith('_toggle')).forEach(a => {
+      hooks.push({ label: a.label, path: '/hook/' + a.id, colour: 'var(--accent2)', desc: a.description || a.category });
+    });
+    actions.filter(a => a.id.startsWith('scene_') && a.id.endsWith('_recall') && a.id !== 'scene_recall').forEach(a => {
+      hooks.push({ label: a.label, path: '/hook/' + a.id, colour: 'var(--amber)', desc: 'Recall scene' });
+    });
+  } catch (e) { /* ignore */ }
 
   const list = document.getElementById('webhook-list');
   list.innerHTML = hooks.map(h => `
@@ -1085,6 +1255,19 @@ function updateStatus(s) {
     kickBtn.textContent = s.kick_enabled ? 'Disable Kick Strobe' : 'Enable Kick Strobe';
     kickBtn.className = 'btn ' + (s.kick_enabled ? 'btn-red' : 'btn-green');
     kickBtn.style.cssText = 'width:100%;justify-content:center;padding:10px';
+  }
+
+  if (s.tempo && s.tempo.bpm) {
+    const bpm = Math.round(s.tempo.bpm);
+    const bd = document.getElementById('bpm-display');
+    const bv = document.getElementById('bpm-val');
+    const bs = document.getElementById('bpm_slider');
+    if (bd) bd.textContent = bpm;
+    if (bv) bv.textContent = bpm;
+    if (bs && document.activeElement !== bs) bs.value = bpm;
+  }
+  if (s.effects) {
+    renderActiveEffects(s.effects.effects || []);
   }
 }
 
@@ -1212,6 +1395,11 @@ async function saveConfig(silent = false) {
     flash_ms: parseInt(document.getElementById('kick-flash-ms').value) || 60,
     debounce_ms: parseInt(document.getElementById('kick-debounce').value) || 150,
   };
+  config.tempo = config.tempo || {};
+  config.tempo.bpm = parseFloat(document.getElementById('bpm_slider')?.value) || config.tempo.bpm || 120;
+  if (!config.groups) config.groups = [];
+  if (!config.scenes) config.scenes = [];
+  if (!config.midi) config.midi = { device: '', enabled: false, mappings: [] };
 
   await fetch('/api/config', {
     method: 'POST',
@@ -1820,6 +2008,352 @@ async function sendStaticNow(name, channels) {
       body: JSON.stringify({ name, channels })
     });
   } catch (e) { /* bridge may not be running */ }
+}
+
+// ---- TEMPO / BLACKOUT ----
+async function tapTempo() {
+  const r = await fetch('/api/tempo/tap', { method: 'POST' });
+  const d = await r.json();
+  toast('BPM ' + Math.round(d.bpm), 'success');
+}
+async function setBpm(v) {
+  document.getElementById('bpm-val').textContent = v;
+  await fetch('/api/tempo/bpm', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bpm: parseFloat(v) })
+  });
+}
+async function doBlackout(fade_ms) {
+  await fetch('/api/blackout', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fade_ms })
+  });
+  toast(fade_ms ? 'Fading to black' : 'Blackout', 'success');
+}
+async function restoreBlackout() {
+  await fetch('/api/blackout', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ restore: true })
+  });
+  toast('Restored', 'success');
+}
+
+// ---- GROUPS ----
+function allFixtureNames() {
+  const names = (config.fixtures || []).map(f => f.name);
+  (config.bars || []).forEach(bar => {
+    const n = bar.segments || 8;
+    const p = bar.name_prefix || 'B-';
+    for (let i = 1; i <= n; i++) names.push(p + i);
+  });
+  return names;
+}
+
+function renderGroups() {
+  const list = document.getElementById('groups-list');
+  if (!list) return;
+  const groups = config.groups || [];
+  if (!groups.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No groups yet</div>';
+    return;
+  }
+  list.innerHTML = groups.map((g, i) => `
+    <div class="fixture-item">
+      <div class="fixture-info" style="flex:1">
+        <div class="fixture-name">${g.name}${g.mirror ? ' ⇄' : ''}</div>
+        <div class="fixture-type-badge">${(g.fixtures||[]).join(', ') || 'empty'}</div>
+      </div>
+      <button class="btn btn-sm" onclick="soloGroup('${g.name.replace(/'/g, "\\'")}')">Solo</button>
+      <button class="btn btn-sm btn-icon" onclick="removeGroup(${i})">✕</button>
+    </div>
+  `).join('');
+}
+
+function refreshGroupSelects() {
+  const opts = '<option value="">All fixtures</option>' +
+    (config.groups || []).map(g => `<option value="${g.name}">${g.name}</option>`).join('');
+  const fx = document.getElementById('fx-group');
+  const solo = document.getElementById('solo-group');
+  if (fx) fx.innerHTML = opts;
+  if (solo) solo.innerHTML = '<option value="">None</option>' +
+    (config.groups || []).map(g => `<option value="${g.name}">${g.name}</option>`).join('');
+}
+
+let _grpOrder = [];
+function showAddGroup() {
+  _grpOrder = [];
+  document.getElementById('add-group-form').style.display = '';
+  document.getElementById('grp-name').value = '';
+  const box = document.getElementById('grp-fixture-checks');
+  box.innerHTML = allFixtureNames().map(n =>
+    `<label style="display:flex;align-items:center;gap:4px;background:var(--bg);padding:4px 8px;border-radius:4px;border:1px solid var(--border);cursor:pointer;font-size:12px">
+      <input type="checkbox" value="${n}" onchange="toggleGrpPick(this)"> ${n}
+    </label>`
+  ).join('');
+}
+function toggleGrpPick(el) {
+  if (el.checked) _grpOrder.push(el.value);
+  else _grpOrder = _grpOrder.filter(x => x !== el.value);
+}
+async function addGroup() {
+  const name = document.getElementById('grp-name').value.trim();
+  if (!name) return toast('Name required', 'error');
+  if (!_grpOrder.length) return toast('Pick at least one fixture', 'error');
+  config.groups = config.groups || [];
+  config.groups.push({
+    name,
+    fixtures: [..._grpOrder],
+    mirror: document.getElementById('grp-mirror').value === '1'
+  });
+  await fetch('/api/groups', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config.groups)
+  });
+  document.getElementById('add-group-form').style.display = 'none';
+  renderGroups();
+  refreshGroupSelects();
+  toast('Group saved', 'success');
+}
+async function removeGroup(i) {
+  config.groups.splice(i, 1);
+  await fetch('/api/groups', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config.groups)
+  });
+  renderGroups();
+  refreshGroupSelects();
+}
+async function soloGroup(name) {
+  await fetch('/api/solo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toggle: true, group: name })
+  });
+  toast('Solo: ' + name, 'success');
+}
+async function setSolo(v) {
+  await fetch('/api/solo', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(v ? { group: v } : { clear: true })
+  });
+}
+
+// ---- EFFECTS ----
+const EFFECT_LABELS = {
+  chase: 'Color Chase', rainbow: 'Rainbow', wipe: 'Wipe', pulse: 'Pulse',
+  strobe: 'Strobe', fire: 'Fire', sparkle: 'Sparkle', bump: 'Bump', spectrum: 'Spectrum'
+};
+function renderEffectButtons() {
+  const el = document.getElementById('effect-buttons');
+  if (!el) return;
+  el.innerHTML = Object.entries(EFFECT_LABELS).map(([id, label]) => `
+    <button class="btn" style="justify-content:center" onclick="toggleEffect('${id}')">${label}</button>
+  `).join('');
+}
+function renderActiveEffects(list) {
+  const el = document.getElementById('active-effects');
+  if (!el) return;
+  if (!list.length) { el.textContent = 'None'; return; }
+  el.innerHTML = list.map(e =>
+    `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span>${e.label}${e.group ? ' → ' + e.group : ' → all'}</span>
+      <button class="btn btn-sm btn-red" onclick="stopEffect('${e.effect_id}', ${e.group ? `'${e.group.replace(/'/g, "\\'")}'` : 'null'})">Stop</button>
+    </div>`
+  ).join('');
+}
+async function toggleEffect(id) {
+  const group = document.getElementById('fx-group')?.value || null;
+  const r = await fetch('/api/effects');
+  const st = await r.json();
+  const running = (st.effects || []).some(e => e.effect_id === id && (e.group || null) === (group || null));
+  if (running) {
+    await fetch('/api/effects/stop', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effect_id: id, group: group || null })
+    });
+  } else {
+    await fetch('/api/effects/start', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effect_id: id, group: group || null })
+    });
+  }
+}
+async function stopEffect(id, group) {
+  await fetch('/api/effects/stop', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ effect_id: id, group })
+  });
+}
+async function clearEffects() {
+  await fetch('/api/effects/clear', { method: 'POST' });
+  toast('Effects cleared', 'success');
+}
+async function setFxParamGlobal(param, value) {
+  const r = await fetch('/api/effects');
+  const st = await r.json();
+  for (const e of (st.effects || [])) {
+    if (e.params && param in e.params) {
+      await fetch('/api/effects/param', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effect_id: e.effect_id, param, value, group: e.group })
+      });
+    }
+  }
+}
+function pollSpectrum() {
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/spectrum');
+      const d = await r.json();
+      const el = document.getElementById('spectrum-bars');
+      if (!el || !d.bands) return;
+      el.innerHTML = d.bands.map(b => {
+        const h = Math.max(2, Math.round(b * 36));
+        return `<div style="flex:1;height:${h}px;background:var(--accent2);border-radius:2px;opacity:0.85"></div>`;
+      }).join('');
+    } catch (e) {}
+  }, 100);
+}
+
+// ---- SCENES ----
+async function renderScenes() {
+  const list = document.getElementById('scenes-list');
+  if (!list) return;
+  try {
+    const r = await fetch('/api/scenes');
+    config.scenes = await r.json();
+  } catch (e) {}
+  const scenes = config.scenes || [];
+  if (!scenes.length) {
+    list.innerHTML = '<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px">No scenes yet — snapshot a look</div>';
+    return;
+  }
+  list.innerHTML = scenes.map(s => `
+    <div class="fixture-item">
+      <div class="fixture-info" style="flex:1">
+        <div class="fixture-name">${s.name}</div>
+        <div class="fixture-type-badge">${Object.keys(s.colours||{}).length} fixtures · fade ${s.fade_ms||0}ms</div>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="recallScene('${s.name.replace(/'/g, "\\'")}')">Recall</button>
+      <button class="btn btn-sm btn-icon" onclick="deleteScene('${s.name.replace(/'/g, "\\'")}')">✕</button>
+    </div>
+  `).join('');
+}
+async function snapshotScene() {
+  const name = prompt('Scene name', 'Look ' + ((config.scenes||[]).length + 1));
+  if (!name) return;
+  const fade_ms = parseInt(document.getElementById('scene-fade-ms')?.value) || 500;
+  await fetch('/api/scenes/snapshot', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, fade_ms })
+  });
+  await renderScenes();
+  loadWebhooks();
+  toast('Scene saved', 'success');
+}
+async function recallScene(name) {
+  const fade_ms = parseInt(document.getElementById('scene-fade-ms')?.value);
+  await fetch('/api/scenes/recall', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, fade_ms })
+  });
+  toast('Recalled ' + name, 'success');
+}
+async function deleteScene(name) {
+  await fetch('/api/scenes/' + encodeURIComponent(name), { method: 'DELETE' });
+  await renderScenes();
+  loadWebhooks();
+}
+
+// ---- MIDI ----
+async function loadMidiDevices() {
+  const sel = document.getElementById('midi-device');
+  if (!sel) return;
+  const r = await fetch('/api/midi/devices');
+  const d = await r.json();
+  if (d.error) {
+    sel.innerHTML = `<option value="">${d.error}</option>`;
+    return;
+  }
+  const cur = (config.midi && config.midi.device) || '';
+  sel.innerHTML = '<option value="">Select device...</option>' +
+    (d.devices || []).map(dev =>
+      `<option value="${dev.name}" ${cur && dev.name.toLowerCase().includes(String(cur).toLowerCase()) ? 'selected' : ''}>${dev.name}</option>`
+    ).join('');
+}
+async function startMidi() {
+  const device = document.getElementById('midi-device')?.value || '';
+  const r = await fetch('/api/midi/start', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device })
+  });
+  const d = await r.json();
+  toast(d.ok ? 'MIDI connected' : (d.error || 'MIDI failed'), d.ok ? 'success' : 'error');
+  updateMidiUI(d);
+}
+async function stopMidi() {
+  const r = await fetch('/api/midi/stop', { method: 'POST' });
+  updateMidiUI(await r.json());
+}
+async function loadMidiActions() {
+  const el = document.getElementById('midi-actions');
+  if (!el) return;
+  const r = await fetch('/api/actions');
+  const actions = await r.json();
+  el.innerHTML = actions.map(a => `
+    <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:500">${a.label}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--muted)">${a.id} · ${a.kind}</div>
+      </div>
+      <button class="btn btn-sm" onclick="midiLearn('${a.id}')">Learn</button>
+      <button class="btn btn-sm" onclick="midiUnmap('${a.id}')">Unmap</button>
+    </div>
+  `).join('');
+}
+async function midiLearn(action) {
+  await fetch('/api/midi/learn', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action })
+  });
+  toast('Move a MIDI control for ' + action, 'success');
+}
+async function midiUnmap(action) {
+  await fetch('/api/midi/unmap', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action })
+  });
+}
+function updateMidiUI(s) {
+  const st = document.getElementById('midi-status');
+  if (st) {
+    st.textContent = s.active ? ('Connected: ' + (s.device || '')) : (s.error || 'Disconnected');
+    st.style.color = s.active ? 'var(--green)' : 'var(--muted)';
+  }
+  const last = document.getElementById('midi-last');
+  if (last && s.last_event) {
+    const e = s.last_event;
+    last.textContent = `Last: ${e.type} ch${e.channel} #${e.number} val=${e.value}` +
+      (e.learned ? ` → learned ${e.learned}` : '');
+  }
+  const mapEl = document.getElementById('midi-mappings');
+  if (mapEl) {
+    const maps = s.mappings || [];
+    mapEl.innerHTML = maps.length ? maps.map(m => `
+      <div style="display:flex;gap:8px;align-items:center;font-size:12px;padding:6px 8px;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+        <span style="font-family:var(--mono);flex:1">${m.action}</span>
+        <span style="color:var(--muted)">${m.type} ch${m.channel} #${m.number}</span>
+        <button class="btn btn-sm" onclick="midiUnmap('${m.action}')">✕</button>
+      </div>
+    `).join('') : '<div style="color:var(--muted);font-size:12px">No mappings yet</div>';
+  }
+}
+function pollMidiState() {
+  setInterval(async () => {
+    try {
+      const r = await fetch('/api/midi/state');
+      updateMidiUI(await r.json());
+    } catch (e) {}
+  }, 1000);
 }
 
 // Redraw canvas on resize

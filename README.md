@@ -324,9 +324,9 @@ edge of the frame. **Custom** uses a manually defined zone.
 
 ## Webhooks (Stream Deck / Remote Control)
 
-The bridge exposes simple GET endpoints so a Stream Deck or any networked device
-can pause/resume without touching the machine. See the **Webhooks** panel in the
-Test tab for the URLs with your machine's IP filled in.
+Every control action is exposed at `/hook/<action_id>` (GET or POST). Legacy URLs
+(`fog-on`, `kick-strobe-toggle`, …) still work. See the **Webhooks** panel in the
+Test tab for your machine's IP filled in, or `GET /api/actions` for the full list.
 
 | URL | Action |
 |-----|--------|
@@ -341,10 +341,45 @@ Test tab for the URLs with your machine's IP filled in.
 | `http://<ip>:5000/hook/kick-strobe-on` | Enable flash-on-kick (opens audio input) |
 | `http://<ip>:5000/hook/kick-strobe-off` | Disable flash-on-kick |
 | `http://<ip>:5000/hook/kick-strobe-toggle` | Flip kick strobe on/off (single button) |
+| `http://<ip>:5000/hook/tap-tempo` | Tap tempo |
+| `http://<ip>:5000/hook/effect_chase_toggle` | Toggle chase (also: rainbow, wipe, pulse, strobe, fire, sparkle, bump, spectrum) |
+| `http://<ip>:5000/hook/effect-clear` | Stop all effects |
+| `http://<ip>:5000/hook/blackout` | Instant blackout |
+| `http://<ip>:5000/hook/blackout-fade?fade_ms=1000` | Fade to black |
+| `http://<ip>:5000/hook/restore` | Clear blackout |
+| `http://<ip>:5000/hook/scene_recall?scene=Altar` | Recall a named scene |
 | `http://<ip>:5000/hook/status` | Return current state as JSON |
 
 **Stream Deck setup:** add a **Website** action, paste the URL, and enable
 "Access in background" so it fires without opening a browser.
+
+---
+
+## Effects, Groups & Scenes
+
+Ambient screen-follow remains the base layer. Effects composite on top and are
+**off by default** — existing configs keep working unchanged.
+
+1. **Groups** — ordered fixture lists for chase/wipe direction; optional mirror
+2. **Effects** — chase, rainbow, wipe, pulse, strobe, fire, sparkle, bump, spectrum
+3. **Scenes** — snapshot the current look and recall with a fade
+4. **Solo** — highlight one group while dimming the rest
+5. **Tempo** — tap tempo / BPM slider; beat-synced effects follow it
+
+Spectrum analyzer uses the same audio input as kick strobe (FFT bands).
+
+---
+
+## MIDI Control
+
+The **MIDI** tab maps any note or CC to the same action registry as webhooks.
+
+1. `pip install mido python-rtmidi`
+2. Connect a controller, pick the input, click **Connect**
+3. Click **Learn** next to an action, then move a pad/knob/fader
+4. Mappings save into `config.json` under `midi.mappings`
+
+Faders use soft takeover so connecting a controller won't jump levels.
 
 ---
 
@@ -413,8 +448,12 @@ The bridge is tuned to keep colours vivid and avoid washing out to white:
 ```
 pixel-mapping-to-osc/
 ├── app.py                  # Flask server + bridge engine
+├── effects.py              # Generative effects, scenes, compositor
+├── actions.py              # Shared action registry (UI / webhooks / MIDI)
+├── midi_control.py         # MIDI input, learn, soft takeover
+├── tempo.py                # BPM / tap-tempo clock
 ├── config.json             # Your saved configuration (gitignored)
-├── config.example.json     # Example configuration to copy (fixtures + bars)
+├── config.example.json     # Example configuration to copy
 ├── requirements.txt        # Python dependencies
 ├── README.md               # This file
 └── templates/
@@ -429,9 +468,9 @@ PRs welcome. Key areas that would be useful:
 
 - NDI input source (alternative to screen capture)
 - Additional fixture type presets
-- MIDI start/stop control
 - Multi-venue config profiles
 - artnet/sACN direct output (bypassing Lightkey)
+- MIDI LED / ring feedback for specific controllers
 
 ---
 

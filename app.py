@@ -19,6 +19,11 @@ import numpy as np
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify
 
+from tempo import TempoClock
+from effects import EffectEngine, EFFECT_DEFS
+from actions import build_actions
+from midi_control import MidiController
+
 app = Flask(__name__)
 log = logging.getLogger("pixel-mapping-osc")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -44,6 +49,15 @@ DEFAULT_CONFIG = {
     "fixtures": [],
     "bars": [],
     "static_controls": [],
+    "groups": [],
+    "scenes": [],
+    "palettes": [],
+    "tempo": {"bpm": 120},
+    "midi": {
+        "device": "",
+        "enabled": False,
+        "mappings": []
+    },
     "kick_strobe": {
         "device": "",        # input device name substring, e.g. "Dante"
         "channel": 1,        # 1-based input channel carrying the kick mic
@@ -443,7 +457,11 @@ class KickDetector:
     arriving on a Dante Virtual Soundcard channel) and fires a callback on
     each hit. A simple peak detector with hysteresis + debounce — reliable
     on an isolated kick channel, not a general beat tracker.
+
+    Also maintains a lightweight FFT spectrum (8 bands) for the spectrum effect.
     """
+
+    SPECTRUM_BANDS = 8
 
     def __init__(self, on_kick):
         self.on_kick = on_kick
@@ -459,6 +477,9 @@ class KickDetector:
         self._armed = True
         self._last_hit = 0.0
         self._hit_event = threading.Event()
+        self.spectrum = [0.0] * self.SPECTRUM_BANDS
+        self._fft_buf = np.zeros(1024, dtype=np.float32)
+        self._fft_pos = 0
 
     @staticmethod
     def _rescan():
@@ -560,7 +581,8 @@ class KickDetector:
         self._armed = True
 
     def _audio_cb(self, indata, frames, t, status):
-        peak = min(1.0, float(np.max(np.abs(indata[:, self.channel - 1]))) * self.gain)
+        ch = indata[:, self.channel - 1]
+        peak = min(1.0, float(np.max(np.abs(ch))) * self.gain)
         # Decaying peak so the UI meter is readable
         self.level = max(peak, self.level * 0.92)
         now = time.monotonic()
@@ -572,6 +594,42 @@ class KickDetector:
             self._hit_event.set()
         elif not self._armed and peak < self.threshold * 0.5:
             self._armed = True
+
+        # Rolling FFT buffer → 8-band spectrum
+        try:
+            samples = (ch.astype(np.float32) * self.gain).ravel()
+            n = len(samples)
+            if n > 0:
+                end = self._fft_pos + n
+                if end <= len(self._fft_buf):
+                    self._fft_buf[self._fft_pos:end] = samples
+                    self._fft_pos = end
+                else:
+                    # wrap / refill
+                    self._fft_buf[:] = 0
+                    take = min(n, len(self._fft_buf))
+                    self._fft_buf[:take] = samples[-take:]
+                    self._fft_pos = take
+                if self._fft_pos >= len(self._fft_buf):
+                    windowed = self._fft_buf * np.hanning(len(self._fft_buf))
+                    mag = np.abs(np.fft.rfft(windowed))
+                    mag = mag / (np.max(mag) + 1e-9)
+                    # Log-ish band split across spectrum
+                    bands = self.SPECTRUM_BANDS
+                    edges = np.logspace(0, np.log10(len(mag)), bands + 1).astype(int)
+                    edges = np.clip(edges, 0, len(mag) - 1)
+                    new_spec = []
+                    for i in range(bands):
+                        a, b = edges[i], max(edges[i] + 1, edges[i + 1])
+                        new_spec.append(float(np.mean(mag[a:b])))
+                    # Smooth
+                    self.spectrum = [
+                        0.65 * old + 0.35 * new
+                        for old, new in zip(self.spectrum, new_spec)
+                    ]
+                    self._fft_pos = 0
+        except Exception:
+            pass
 
     def _dispatch(self):
         # OSC sends happen here, off the PortAudio callback thread
@@ -595,6 +653,7 @@ class BridgeEngine:
         self.fog_enabled = True
         self.config = self._load_config()
         self.current_colours = {}
+        self.output_colours = {}
         self.osc = None
         self.capture = None
         self._thread = None
@@ -604,13 +663,48 @@ class BridgeEngine:
         self.kick_enabled = False
         self.flash_until = 0.0
         self.kick = KickDetector(on_kick=self._on_kick)
+        self.tempo = TempoClock(self.config.get("tempo", {}).get("bpm", 120))
+        self.effects = EffectEngine(
+            self.tempo,
+            get_config=lambda: self.config,
+            get_spectrum=lambda: list(self.kick.spectrum),
+        )
+        self.effects.scenes.load_from_config(self.config.get("scenes", []))
+        self.midi = MidiController(
+            on_action=self._midi_action,
+            get_config=lambda: self.config,
+            save_mappings=self._save_midi_config,
+        )
+        self.actions = None  # set after engine global exists via init_actions()
+
+    def init_actions(self):
+        self.actions = build_actions(self, self.effects, self.tempo, self.midi)
+        if self.config.get("midi", {}).get("enabled"):
+            self.midi.start(self.config.get("midi", {}).get("device", ""))
+
+    def _midi_action(self, action_id, value=None, **kwargs):
+        if not self.actions:
+            return
+        return self.actions.invoke(action_id, value=value, **kwargs)
+
+    def _save_midi_config(self, cfg):
+        self.config = cfg
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
 
     def _load_config(self):
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE) as f:
                     cfg = DEFAULT_CONFIG.copy()
-                    cfg.update(json.load(f))
+                    loaded = json.load(f)
+                    cfg.update(loaded)
+                    # Deep-merge nested dicts we care about
+                    for key in ("kick_strobe", "tempo", "midi"):
+                        if key in loaded and isinstance(loaded[key], dict):
+                            base = DEFAULT_CONFIG.get(key, {}).copy()
+                            base.update(loaded[key])
+                            cfg[key] = base
                     return cfg
             except Exception:
                 pass
@@ -620,9 +714,21 @@ class BridgeEngine:
         self.config = cfg
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg, f, indent=2)
+        # Sync tempo / scenes / midi from saved config
+        bpm = cfg.get("tempo", {}).get("bpm")
+        if bpm:
+            self.tempo.set_bpm(bpm)
+        self.effects.scenes.load_from_config(cfg.get("scenes", []))
+        if self.actions and hasattr(self.actions, "refresh_scene_actions"):
+            self.actions.refresh_scene_actions()
         # Restart the kick detector so device/threshold changes apply live
         if self.kick_enabled:
             self.set_kick_strobe(True)
+        midi_cfg = cfg.get("midi", {})
+        if midi_cfg.get("enabled"):
+            self.midi.start(midi_cfg.get("device", ""))
+        else:
+            self.midi.stop()
 
     def start(self):
         if self.running:
@@ -844,19 +950,26 @@ class BridgeEngine:
                     g = min(255, int(g * scale))
                     b = min(255, int(b * scale))
 
-            # Smooth colour values
+            # Smooth colour values (ambient base — never overwritten by effects)
             prev = self.current_colours.get(name, (0, 0, 0, 0, 0))
             smooth_r = int(prev[0] + smoothing * (r - prev[0]))
             smooth_g = int(prev[1] + smoothing * (g - prev[1]))
             smooth_b = int(prev[2] + smoothing * (b - prev[2]))
             self.current_colours[name] = (smooth_r, smooth_g, smooth_b, 0, 0)
 
-            # Convert smoothed values to fixture channels
-            channels = rgb_to_channels(smooth_r, smooth_g, smooth_b, fx_type)
+        # Composite effects / scenes / solo / blackout over ambient base.
+        # When nothing is active the compositor returns ambient unchanged.
+        ambient = {n: c[:3] for n, c in self.current_colours.items()}
+        composed = self.effects.composite(ambient)
+        self.output_colours = composed
 
-            # During a kick flash the white values were already sent from the
-            # detector thread — hold off so ambient doesn't overwrite them.
-            if self.enabled and self.osc and time.time() >= self.flash_until:
+        # During a kick flash the white values were already sent from the
+        # detector thread — hold off so ambient doesn't overwrite them.
+        if self.enabled and self.osc and time.time() >= self.flash_until:
+            for fx in fixtures:
+                name = fx["name"]
+                rgb = composed.get(name, ambient.get(name, (0, 0, 0)))
+                channels = rgb_to_channels(rgb[0], rgb[1], rgb[2], fx["type"])
                 self.osc.send_fixture(name, channels)
 
     def _run(self):
@@ -905,6 +1018,11 @@ class BridgeEngine:
             "kick_enabled": self.kick_enabled,
             "kick_hits": self.kick.hits,
             "kick_error": self.kick.error,
+            "tempo": self.tempo.state(),
+            "effects": self.effects.state(),
+            "midi": self.midi.state(),
+            "group_count": len(self.config.get("groups", [])),
+            "scene_count": len(self.config.get("scenes", [])),
         }
 
 
@@ -913,6 +1031,7 @@ class BridgeEngine:
 # ---------------------------------------------------------------------------
 
 engine = BridgeEngine()
+engine.init_actions()
 
 
 # ---------------------------------------------------------------------------
@@ -923,7 +1042,8 @@ engine = BridgeEngine()
 def index():
     return render_template("index.html",
                            fixture_types=FIXTURE_TYPES,
-                           config=engine.config)
+                           config=engine.config,
+                           effect_defs=EFFECT_DEFS)
 
 
 @app.route("/api/state")
@@ -962,110 +1082,279 @@ def api_toggle():
 
 
 # ---------------------------------------------------------------------------
-# WEBHOOK ROUTES — for Stream Deck / external triggers
-# These accept GET so they can be hit from a simple URL button.
-# Example Stream Deck "Website" or "HTTP Request" action:
-#   http://<bridge-ip>:5000/hook/pause
-#   http://<bridge-ip>:5000/hook/resume
-#   http://<bridge-ip>:5000/hook/toggle
-#   http://<bridge-ip>:5000/hook/start
-#   http://<bridge-ip>:5000/hook/stop
-#   http://<bridge-ip>:5000/hook/fog-on
-#   http://<bridge-ip>:5000/hook/fog-off
-#   http://<bridge-ip>:5000/hook/fog-toggle
-#   http://<bridge-ip>:5000/hook/kick-strobe-on
-#   http://<bridge-ip>:5000/hook/kick-strobe-off
-#   http://<bridge-ip>:5000/hook/kick-strobe-toggle
+# ACTION / WEBHOOK ROUTES — shared registry for UI, Stream Deck, MIDI
+# Legacy URLs (/hook/pause, /hook/fog-on, …) keep working via aliases.
 # ---------------------------------------------------------------------------
 
-@app.route("/hook/pause", methods=["GET", "POST"])
-def hook_pause():
-    """Pause ambient control (clears overrides, hands control to LD)."""
-    if engine.enabled:
-        engine.toggle()  # toggle off
-    return jsonify({"enabled": engine.enabled, "action": "pause"})
+def _action_kwargs():
+    """Merge query args + JSON body into kwargs for action invoke."""
+    kwargs = {}
+    for k, v in request.args.items():
+        kwargs[k] = v
+    if request.is_json and isinstance(request.json, dict):
+        kwargs.update(request.json)
+    if "effect" in kwargs and "effect_id" not in kwargs:
+        kwargs["effect_id"] = kwargs["effect"]
+    if "name" in kwargs and "scene" not in kwargs:
+        kwargs["scene"] = kwargs["name"]
+    return kwargs
 
 
-@app.route("/hook/resume", methods=["GET", "POST"])
-def hook_resume():
-    """Resume ambient control."""
-    if not engine.enabled:
-        engine.toggle()  # toggle on
-    # If the bridge was stopped entirely, start it
-    if not engine.running:
-        engine.start()
-    return jsonify({"enabled": engine.enabled, "running": engine.running, "action": "resume"})
+@app.route("/api/actions", methods=["GET"])
+def api_actions_list():
+    return jsonify(engine.actions.list_actions() if engine.actions else [])
 
 
-@app.route("/hook/toggle", methods=["GET", "POST"])
-def hook_toggle():
-    """Toggle pause/resume — single button that flips state."""
-    enabled = engine.toggle()
-    return jsonify({"enabled": enabled, "action": "toggle"})
+@app.route("/api/action/<action_id>", methods=["GET", "POST"])
+def api_action(action_id):
+    kwargs = _action_kwargs()
+    value = kwargs.pop("value", None)
+    if value is not None:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            pass
+    result = engine.actions.invoke(action_id, value=value, **kwargs)
+    return jsonify(result)
 
 
-@app.route("/hook/start", methods=["GET", "POST"])
-def hook_start():
-    """Start the bridge."""
-    engine.start()
-    return jsonify({"running": engine.running, "action": "start"})
+@app.route("/hook/<path:action_id>", methods=["GET", "POST"])
+def hook_action(action_id):
+    """Universal webhook — any registered action id, plus legacy aliases."""
+    aliases = {
+        "fog-on": "fog_on",
+        "fog-off": "fog_off",
+        "fog-toggle": "fog_toggle",
+        "kick-strobe-on": "kick_on",
+        "kick-strobe-off": "kick_off",
+        "kick-strobe-toggle": "kick_toggle",
+        "tap-tempo": "tap_tempo",
+        "effect-clear": "effect_clear",
+        "blackout-fade": "blackout_fade",
+        "solo-clear": "solo_clear",
+        "scene-clear": "scene_clear",
+    }
+    if action_id == "status":
+        return jsonify(engine.get_state())
+
+    mapped = aliases.get(action_id, action_id.replace("-", "_"))
+    kwargs = _action_kwargs()
+    value = kwargs.pop("value", None)
+    if value is not None:
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            pass
+    result = engine.actions.invoke(mapped, value=value, **kwargs)
+    status = 200 if result.get("ok") else 404
+    return jsonify(result), status
 
 
-@app.route("/hook/stop", methods=["GET", "POST"])
-def hook_stop():
-    """Stop the bridge and clear all overrides."""
-    engine.stop()
-    return jsonify({"running": engine.running, "action": "stop"})
+# ---------------------------------------------------------------------------
+# EFFECTS / SCENES / GROUPS / TEMPO / MIDI
+# ---------------------------------------------------------------------------
+
+@app.route("/api/effects", methods=["GET"])
+def api_effects_get():
+    return jsonify(engine.effects.state())
 
 
-@app.route("/hook/fog-on", methods=["GET", "POST"])
-def hook_fog_on():
-    """Turn hazer/fog static controls on."""
-    enabled = engine.set_fog(True)
-    return jsonify({"fog_enabled": enabled, "action": "fog-on"})
+@app.route("/api/effects/start", methods=["POST"])
+def api_effects_start():
+    data = request.json or {}
+    inst = engine.effects.start_effect(
+        data.get("effect_id", "chase"),
+        group=data.get("group"),
+        params=data.get("params"),
+        bpm_sync=data.get("bpm_sync", True),
+    )
+    return jsonify({"ok": True, "effect": inst.to_dict()})
 
 
-@app.route("/hook/fog-off", methods=["GET", "POST"])
-def hook_fog_off():
-    """Turn hazer/fog static controls off."""
-    enabled = engine.set_fog(False)
-    return jsonify({"fog_enabled": enabled, "action": "fog-off"})
+@app.route("/api/effects/stop", methods=["POST"])
+def api_effects_stop():
+    data = request.json or {}
+    n = engine.effects.stop_effect(data.get("effect_id"), group=data.get("group"))
+    return jsonify({"ok": True, "stopped": n})
 
 
-@app.route("/hook/fog-toggle", methods=["GET", "POST"])
-def hook_fog_toggle():
-    """Flip hazer/fog on/off — single button that toggles state."""
-    enabled = engine.toggle_fog()
-    return jsonify({"fog_enabled": enabled, "action": "fog-toggle"})
+@app.route("/api/effects/clear", methods=["POST"])
+def api_effects_clear():
+    return jsonify({"ok": True, "cleared": engine.effects.clear_effects()})
 
 
-@app.route("/hook/kick-strobe-on", methods=["GET", "POST"])
-def hook_kick_on():
-    """Enable kick-triggered strobe (opens the audio input)."""
-    enabled = engine.set_kick_strobe(True)
-    return jsonify({"kick_enabled": enabled, "error": engine.kick.error,
-                    "action": "kick-strobe-on"})
+@app.route("/api/effects/param", methods=["POST"])
+def api_effects_param():
+    data = request.json or {}
+    ok = engine.effects.set_param(
+        data.get("effect_id"), data.get("param"), data.get("value"),
+        group=data.get("group"),
+    )
+    return jsonify({"ok": ok})
 
 
-@app.route("/hook/kick-strobe-off", methods=["GET", "POST"])
-def hook_kick_off():
-    """Disable kick-triggered strobe (closes the audio input)."""
-    enabled = engine.set_kick_strobe(False)
-    return jsonify({"kick_enabled": enabled, "action": "kick-strobe-off"})
+@app.route("/api/tempo", methods=["GET"])
+def api_tempo_get():
+    return jsonify(engine.tempo.state())
 
 
-@app.route("/hook/kick-strobe-toggle", methods=["GET", "POST"])
-def hook_kick_toggle():
-    """Flip kick strobe on/off — single button that toggles state."""
-    enabled = engine.toggle_kick_strobe()
-    return jsonify({"kick_enabled": enabled, "error": engine.kick.error,
-                    "action": "kick-strobe-toggle"})
+@app.route("/api/tempo/tap", methods=["POST"])
+def api_tempo_tap():
+    bpm = engine.tempo.tap()
+    engine.config.setdefault("tempo", {})["bpm"] = bpm
+    return jsonify({"bpm": bpm})
 
 
-@app.route("/hook/status", methods=["GET"])
-def hook_status():
-    """Return current state — useful for Stream Deck multi-state buttons."""
-    return jsonify(engine.get_state())
+@app.route("/api/tempo/bpm", methods=["POST"])
+def api_tempo_bpm():
+    data = request.json or {}
+    bpm = engine.tempo.set_bpm(data.get("bpm", 120))
+    engine.config.setdefault("tempo", {})["bpm"] = bpm
+    return jsonify({"bpm": bpm})
+
+
+@app.route("/api/groups", methods=["GET"])
+def api_groups_get():
+    return jsonify(engine.config.get("groups", []))
+
+
+@app.route("/api/groups", methods=["POST"])
+def api_groups_save():
+    groups = request.json if isinstance(request.json, list) else (request.json or {}).get("groups", [])
+    engine.config["groups"] = groups
+    engine.save_config(engine.config)
+    return jsonify({"ok": True, "groups": groups})
+
+
+@app.route("/api/scenes", methods=["GET"])
+def api_scenes_get():
+    return jsonify(engine.effects.scenes.list_scenes())
+
+
+@app.route("/api/scenes", methods=["POST"])
+def api_scenes_save_all():
+    scenes = request.json if isinstance(request.json, list) else (request.json or {}).get("scenes", [])
+    engine.config["scenes"] = scenes
+    engine.effects.scenes.load_from_config(scenes)
+    if hasattr(engine.actions, "refresh_scene_actions"):
+        engine.actions.refresh_scene_actions()
+    engine.save_config(engine.config)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/scenes/snapshot", methods=["POST"])
+def api_scenes_snapshot():
+    data = request.json or {}
+    name = data.get("name") or f"Look {len(engine.effects.scenes.scenes) + 1}"
+    fade_ms = int(data.get("fade_ms", 500))
+    src = engine.output_colours or {k: v[:3] for k, v in engine.current_colours.items()}
+    scene = engine.effects.scenes.save_scene(name, src, group=data.get("group"), fade_ms=fade_ms)
+    engine.config["scenes"] = engine.effects.scenes.list_scenes()
+    if hasattr(engine.actions, "refresh_scene_actions"):
+        engine.actions.refresh_scene_actions()
+    engine.save_config(engine.config)
+    return jsonify({"ok": True, "scene": scene})
+
+
+@app.route("/api/scenes/recall", methods=["POST"])
+def api_scenes_recall():
+    data = request.json or {}
+    name = data.get("name")
+    current = {k: v[:3] for k, v in (engine.output_colours or engine.current_colours).items()}
+    ok = engine.effects.scenes.recall(name, current, fade_ms=data.get("fade_ms"))
+    return jsonify({"ok": ok, "scene": name})
+
+
+@app.route("/api/scenes/<name>", methods=["DELETE"])
+def api_scenes_delete(name):
+    engine.effects.scenes.delete_scene(name)
+    engine.config["scenes"] = engine.effects.scenes.list_scenes()
+    if hasattr(engine.actions, "refresh_scene_actions"):
+        engine.actions.refresh_scene_actions()
+    engine.save_config(engine.config)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/solo", methods=["POST"])
+def api_solo():
+    data = request.json or {}
+    if data.get("toggle"):
+        g = engine.effects.toggle_solo(data.get("group", ""))
+    elif data.get("clear"):
+        g = engine.effects.set_solo(None)
+    else:
+        g = engine.effects.set_solo(data.get("group"))
+    return jsonify({"solo_group": g})
+
+
+@app.route("/api/blackout", methods=["POST"])
+def api_blackout():
+    data = request.json or {}
+    fade_ms = int(data.get("fade_ms", 0))
+    if data.get("restore"):
+        engine.effects.clear_master_fade()
+        return jsonify({"blackout": False})
+    engine.effects.start_master_fade(
+        engine.output_colours or engine.current_colours,
+        to_rgb=(0, 0, 0),
+        fade_ms=fade_ms,
+    )
+    if fade_ms <= 0:
+        engine.effects.blackout = True
+    return jsonify({"blackout": True, "fade_ms": fade_ms})
+
+
+@app.route("/api/spectrum")
+def api_spectrum():
+    return jsonify({"bands": engine.kick.spectrum, "level": engine.kick.level})
+
+
+@app.route("/api/midi/devices")
+def api_midi_devices():
+    return jsonify(MidiController.list_inputs())
+
+
+@app.route("/api/midi/state")
+def api_midi_state():
+    return jsonify(engine.midi.state())
+
+
+@app.route("/api/midi/start", methods=["POST"])
+def api_midi_start():
+    data = request.json or {}
+    device = data.get("device", engine.config.get("midi", {}).get("device", ""))
+    ok = engine.midi.start(device)
+    engine.config.setdefault("midi", {})["enabled"] = ok
+    engine.config["midi"]["device"] = engine.midi.port_name or device
+    engine.save_config(engine.config)
+    return jsonify({"ok": ok, **engine.midi.state()})
+
+
+@app.route("/api/midi/stop", methods=["POST"])
+def api_midi_stop():
+    engine.midi.stop()
+    engine.config.setdefault("midi", {})["enabled"] = False
+    engine.save_config(engine.config)
+    return jsonify({"ok": True, **engine.midi.state()})
+
+
+@app.route("/api/midi/learn", methods=["POST"])
+def api_midi_learn():
+    data = request.json or {}
+    if data.get("cancel"):
+        return jsonify(engine.midi.cancel_learn())
+    action_id = data.get("action")
+    if not action_id:
+        return jsonify({"ok": False, "error": "action required"}), 400
+    return jsonify(engine.midi.start_learn(action_id))
+
+
+@app.route("/api/midi/unmap", methods=["POST"])
+def api_midi_unmap():
+    data = request.json or {}
+    if data.get("clear_all"):
+        return jsonify(engine.midi.clear_mappings())
+    return jsonify(engine.midi.unmap(data.get("action", "")))
 
 
 @app.route("/api/local-ip")
@@ -1146,12 +1435,12 @@ def api_clear():
     return jsonify({"ok": True})
 
 
-
 @app.route("/api/live-colours")
 def api_live_colours():
     """Return current output colour per fixture for live UI preview."""
+    src = engine.output_colours or engine.current_colours
     out = {}
-    for name, c in engine.current_colours.items():
+    for name, c in src.items():
         out[name] = {"r": c[0], "g": c[1], "b": c[2]}
     return jsonify(out)
 
@@ -1176,8 +1465,8 @@ def api_test_bar():
     bar = data.get("bar", {})
     colour = data.get("colour", "red")
     colours = {
-        "red": (255,0,0), "green": (0,255,0), "blue": (0,0,255),
-        "white": (255,255,255), "amber": (255,140,0), "off": (0,0,0),
+        "red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255),
+        "white": (255, 255, 255), "amber": (255, 140, 0), "off": (0, 0, 0),
     }
     r, g, b = colours.get(colour, (255, 0, 0))
     osc = LightkeyOSC(engine.config["lightkey_host"], engine.config["lightkey_port"])
@@ -1205,8 +1494,6 @@ def api_kick_toggle():
 
 @app.route("/api/audio-devices")
 def api_audio_devices():
-    # Re-scan for new devices unless the detector's stream is live
-    # (re-initialising PortAudio would kill it)
     return jsonify(KickDetector.list_devices(rescan=not engine.kick.active))
 
 
@@ -1220,6 +1507,7 @@ def api_kick_meter():
         "threshold": ks.get("threshold", 0.5),
         "hits": engine.kick.hits,
         "error": engine.kick.error,
+        "spectrum": engine.kick.spectrum,
     })
 
 
@@ -1243,8 +1531,6 @@ def api_static_send():
     channels = data.get("channels") or [
         {"property": "dimmer", "value": data.get("value", 0)}
     ]
-    # Update in-memory config so the run loop uses the new values immediately
-    # (without this the loop overwrites the slider value with the stale saved config)
     for sc in engine.config.get("static_controls", []):
         if sc.get("name") == name:
             sc["channels"] = channels
@@ -1259,10 +1545,9 @@ def api_static_send():
 
 if __name__ == "__main__":
     import webbrowser
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("  Pixel Mapping to OSC")
     print("  Open: http://localhost:5000")
-    print("="*50 + "\n")
-    # Open browser after short delay
+    print("=" * 50 + "\n")
     threading.Timer(1.2, lambda: webbrowser.open("http://localhost:5000")).start()
     app.run(host="0.0.0.0", port=5000, debug=False)

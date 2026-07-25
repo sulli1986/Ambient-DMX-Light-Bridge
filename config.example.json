@@ -8,6 +8,16 @@
   "colour_boost": 4.0,
   "white_mode": "min",
   "master_brightness": 255,
+  "min_output": 40,
+  "stage_floor_pct": 50,
+  "tempo": {
+    "bpm": 120
+  },
+  "midi": {
+    "device": "",
+    "enabled": false,
+    "mappings": []
+  },
   "kick_strobe": {
     "device": "Dante",
     "channel": 5,
@@ -16,6 +26,20 @@
     "debounce_ms": 150,
     "flash_ms": 60
   },
+  "groups": [
+    {
+      "name": "Front Wash",
+      "fixtures": ["P1", "P2", "P3", "P4", "P5", "P6"],
+      "mirror": false
+    },
+    {
+      "name": "Rear Wash",
+      "fixtures": ["P8", "P9", "P10", "P12", "P13", "P14"],
+      "mirror": false
+    }
+  ],
+  "scenes": [],
+  "palettes": [],
   "fixtures": [
     {
       "name": "P1",
