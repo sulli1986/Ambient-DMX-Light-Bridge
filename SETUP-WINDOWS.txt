@@ -1,0 +1,60 @@
+# Main Machine Setup (Windows)
+
+Copy/paste these commands in PowerShell or Command Prompt from the project folder.
+
+## 1. Install dependencies
+
+```bat
+pip install flask python-osc pillow numpy mss sounddevice mido
+```
+
+Do **not** install pygame or python-rtmidi. MIDI uses Windows built-in WinMM.
+
+Full requirements file (same packages):
+
+```bat
+pip install -r requirements.txt
+```
+
+## 2. Config (first time only)
+
+```bat
+copy config.example.json config.json
+```
+
+Edit `config.json` for your Lightkey IP, fixtures, etc. if needed.
+
+## 3. Run
+
+```bat
+python app.py
+```
+
+Open: http://localhost:5000
+
+## 4. MIDI setup
+
+1. Plug in your MIDI controller
+2. Open the **MIDI** tab in the browser UI
+3. Click **Refresh**
+4. Select your device
+5. Click **Connect**
+6. Click **Learn** next to an action, then press a pad or move a knob/fader
+
+Mappings save automatically into `config.json`.
+
+## Quick checklist
+
+- Python 3.10+ on PATH
+- Lightkey running on Mac with OSC enabled
+- This app runs on the Windows machine with ProPresenter / screen capture
+- Stream Deck webhooks still work at `http://<this-pc-ip>:5000/hook/...`
+
+## If something fails
+
+| Problem | Fix |
+|---------|-----|
+| `pip` not found | `python -m pip install ...` |
+| Wrong Python | `py -3.12 -m pip install ...` then `py -3.12 app.py` |
+| No MIDI devices | Unplug/replug controller, click Refresh, check Windows Sound settings |
+| Port 5000 in use | Close the other app, or change the port in `app.py` |

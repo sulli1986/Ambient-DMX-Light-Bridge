@@ -1,23 +1,24 @@
 """
 MIDI input controller with learn mode and soft takeover.
 
-Uses mido with automatic backend selection:
-  1. python-rtmidi (best when available)
-  2. pygame      (Windows-friendly wheels — preferred install path)
-  3. rtmidi_python (legacy fallback)
+Backend order:
+  1. Windows winmm.dll (ctypes) — no pip build, works on any Python
+  2. mido + python-rtmidi
+  3. mido + pygame
+  4. mido + rtmidi_python
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import platform
 import threading
 import time
 from typing import Callable
 
 log = logging.getLogger("pixel-mapping-osc")
 
-# Tried in order. pygame ships Windows wheels and avoids compiling python-rtmidi.
 _BACKENDS = (
     "mido.backends.rtmidi",
     "mido.backends.pygame",
@@ -25,53 +26,6 @@ _BACKENDS = (
 )
 
 _backend_name: str | None = None
-_backend_error: str | None = None
-
-
-def _ensure_backend():
-    """Import mido and select a working MIDI backend. Cached after first call."""
-    global _backend_name, _backend_error
-    if _backend_name:
-        import mido
-        return mido
-
-    try:
-        import mido
-    except Exception as e:
-        _backend_error = (
-            f"mido not installed ({e}). Run: pip install mido pygame"
-        )
-        raise RuntimeError(_backend_error) from e
-
-    # Honour explicit override
-    forced = os.environ.get("MIDO_BACKEND", "").strip()
-    candidates = (forced,) if forced else _BACKENDS
-
-    errors = []
-    for backend in candidates:
-        if not backend:
-            continue
-        try:
-            mido.set_backend(backend)
-            # Probe — get_input_names must succeed (empty list is OK)
-            mido.get_input_names()
-            _backend_name = backend
-            _backend_error = None
-            log.info(f"MIDI backend: {backend}")
-            return mido
-        except Exception as e:
-            errors.append(f"{backend}: {e}")
-            log.debug(f"MIDI backend {backend} unavailable: {e}")
-
-    _backend_error = (
-        "No working MIDI backend. On Windows install pygame (recommended):\n"
-        "  pip install mido pygame\n"
-        "Or try python-rtmidi on Python 3.11/3.12:\n"
-        "  pip install --upgrade pip setuptools wheel\n"
-        "  pip install python-rtmidi\n"
-        "Tried: " + " | ".join(errors)
-    )
-    raise RuntimeError(_backend_error)
 
 
 class MidiController:
@@ -83,18 +37,36 @@ class MidiController:
         self.port_name = None
         self.active = False
         self.error = None
-        self.learning = None  # action_id being learned, or None
+        self.learning = None
         self.last_event = None
         self.backend = None
         self._thread = None
         self._stop = threading.Event()
         self._pickup: dict[str, float] = {}
         self._pickup_armed: dict[str, bool] = {}
+        self._use_winmm = False
+
+    @staticmethod
+    def _winmm_available() -> bool:
+        return platform.system() == "Windows"
 
     @staticmethod
     def list_inputs(rescan=False):
+        # Prefer native Windows MIDI — never needs compiling
+        if MidiController._winmm_available():
+            try:
+                from winmm_midi import WinMMInput
+                names = WinMMInput.list_names()
+                return {
+                    "error": None,
+                    "backend": "winmm",
+                    "devices": [{"index": i, "name": n} for i, n in enumerate(names)],
+                }
+            except Exception as e:
+                log.warning(f"WinMM MIDI list failed: {e}")
+
         try:
-            mido = _ensure_backend()
+            mido = MidiController._ensure_mido_backend()
             names = mido.get_input_names()
             return {
                 "error": None,
@@ -102,23 +74,78 @@ class MidiController:
                 "devices": [{"index": i, "name": n} for i, n in enumerate(names)],
             }
         except Exception as e:
-            return {"error": str(e), "backend": None, "devices": []}
+            hint = (
+                "No MIDI backend available. "
+                "On Windows this app uses built-in WinMM (no extra install). "
+                f"Detail: {e}"
+            )
+            return {"error": hint, "backend": None, "devices": []}
+
+    @staticmethod
+    def _ensure_mido_backend():
+        global _backend_name
+        if _backend_name:
+            import mido
+            return mido
+
+        import mido
+        forced = os.environ.get("MIDO_BACKEND", "").strip()
+        candidates = (forced,) if forced else _BACKENDS
+        errors = []
+        for backend in candidates:
+            if not backend:
+                continue
+            try:
+                mido.set_backend(backend)
+                mido.get_input_names()
+                _backend_name = backend
+                log.info(f"MIDI backend: {backend}")
+                return mido
+            except Exception as e:
+                errors.append(f"{backend}: {e}")
+        raise RuntimeError(" | ".join(errors) if errors else "No mido backend")
 
     def start(self, device_name: str | None = None):
         self.stop()
         self.error = None
         cfg = self.get_config().get("midi", {})
         name = device_name if device_name is not None else cfg.get("device", "")
+
+        # 1) Windows native
+        if self._winmm_available():
+            try:
+                from winmm_midi import WinMMInput
+                port = WinMMInput()
+                port.open(name if name is not None else "")
+                self.port = port
+                self.port_name = port.name
+                self.backend = "winmm"
+                self._use_winmm = True
+                self.active = True
+                self._stop.clear()
+                self._thread = threading.Thread(target=self._run, daemon=True)
+                self._thread.start()
+                return True
+            except Exception as e:
+                log.warning(f"WinMM MIDI open failed, trying mido: {e}")
+                self.error = str(e)
+
+        # 2) mido backends
+        self._use_winmm = False
         try:
-            mido = _ensure_backend()
+            mido = self._ensure_mido_backend()
             self.backend = _backend_name
         except Exception as e:
-            self.error = str(e)
+            self.error = (
+                f"MIDI open failed: {self.error or e}. "
+                "On Windows, plug in a controller and try again — WinMM needs no pip packages."
+            )
             return False
+
         try:
             target = None
             names = mido.get_input_names()
-            if isinstance(name, int) or (isinstance(name, str) and name.strip().isdigit()):
+            if isinstance(name, int) or (isinstance(name, str) and str(name).strip().isdigit()):
                 idx = int(name)
                 if 0 <= idx < len(names):
                     target = names[idx]
@@ -155,11 +182,15 @@ class MidiController:
         self._stop.set()
         if self.port:
             try:
-                self.port.close()
+                if self._use_winmm:
+                    self.port.close()
+                else:
+                    self.port.close()
             except Exception:
                 pass
             self.port = None
         self.port_name = None
+        self._use_winmm = False
 
     def start_learn(self, action_id: str):
         self.learning = action_id
@@ -193,7 +224,7 @@ class MidiController:
             "learning": self.learning,
             "last_event": self.last_event,
             "mappings": cfg.get("mappings", []),
-            "backend": self.backend or _backend_name,
+            "backend": self.backend or ("winmm" if self._winmm_available() else _backend_name),
         }
 
     def _msg_key(self, msg) -> dict | None:

@@ -374,19 +374,26 @@ Spectrum analyzer uses the same audio input as kick strobe (FFT bands).
 
 The **MIDI** tab maps any note or CC to the same action registry as webhooks.
 
-### Install (Windows)
+### Windows (no extra MIDI packages)
 
-Skip `python-rtmidi` — it often fails to build. Use **pygame** instead (has Windows wheels):
+MIDI uses the built-in Windows `winmm` API — **do not install pygame or python-rtmidi**.
 
 ```bash
-pip install mido pygame
+pip install -r requirements.txt
+python app.py
 ```
 
-Then restart the app. The MIDI tab should list your controller. Backend order:
+Then: **MIDI** tab → Refresh → select controller → Connect → Learn.
 
-1. `python-rtmidi` if present  
-2. **pygame** (recommended on Windows)  
-3. `rtmidi_python` fallback  
+### Other platforms
+
+Install a backend if WinMM is not available:
+
+```bash
+pip install python-rtmidi
+# or
+pip install pygame
+```
 
 ### Use
 
@@ -467,6 +474,7 @@ pixel-mapping-to-osc/
 ├── effects.py              # Generative effects, scenes, compositor
 ├── actions.py              # Shared action registry (UI / webhooks / MIDI)
 ├── midi_control.py         # MIDI input, learn, soft takeover
+├── winmm_midi.py           # Windows-native MIDI (no compile)
 ├── tempo.py                # BPM / tap-tempo clock
 ├── config.json             # Your saved configuration (gitignored)
 ├── config.example.json     # Example configuration to copy
