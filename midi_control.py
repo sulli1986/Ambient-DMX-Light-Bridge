@@ -286,6 +286,7 @@ class MidiController:
             midi["mappings"] = mappings
             if self.port_name:
                 midi["device"] = self.port_name
+                midi["enabled"] = True
             self.save_mappings(cfg)
             self.last_event["learned"] = action_id
             self.last_event["conflict"] = conflict["action"] if conflict else None

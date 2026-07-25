@@ -41,7 +41,12 @@ Open: http://localhost:5000
 5. Click **Connect**
 6. Click **Learn** next to an action, then press a pad or move a knob/fader
 
-Mappings save automatically into `config.json`.
+Mappings save automatically into `config.json` under `midi.mappings`.
+After Connect, leave the app running or restart — MIDI should auto-reconnect if
+`midi.enabled` is true in `config.json`.
+
+Do not worry about clicking **Save Changes** for MIDI; learns write to disk
+immediately. Saving other settings will no longer wipe MIDI maps.
 
 ## Quick checklist
 

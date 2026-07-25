@@ -1400,7 +1400,20 @@ async function saveConfig(silent = false) {
   config.tempo.bpm = parseFloat(document.getElementById('bpm_slider')?.value) || config.tempo.bpm || 120;
   if (!config.groups) config.groups = [];
   if (!config.scenes) config.scenes = [];
-  if (!config.midi) config.midi = { device: '', enabled: false, mappings: [] };
+
+  // MIDI mappings live on the server after Learn — never overwrite with a stale browser copy
+  try {
+    const mr = await fetch('/api/midi/state');
+    const ms = await mr.json();
+    const cr = await fetch('/api/config');
+    const serverCfg = await cr.json();
+    config.midi = serverCfg.midi || config.midi || { device: '', enabled: false, mappings: [] };
+    if (ms.mappings) config.midi.mappings = ms.mappings;
+    if (ms.device) config.midi.device = ms.device;
+    config.midi.enabled = !!ms.active || !!config.midi.enabled;
+  } catch (e) {
+    if (!config.midi) config.midi = { device: '', enabled: false, mappings: [] };
+  }
 
   await fetch('/api/config', {
     method: 'POST',
@@ -2325,6 +2338,12 @@ async function midiUnmap(action) {
   });
 }
 function updateMidiUI(s) {
+  // Keep browser config in sync so Save never wipes learns
+  config.midi = config.midi || { device: '', enabled: false, mappings: [] };
+  if (Array.isArray(s.mappings)) config.midi.mappings = s.mappings;
+  if (s.device) config.midi.device = s.device;
+  config.midi.enabled = !!s.active;
+
   const st = document.getElementById('midi-status');
   if (st) {
     st.textContent = s.active ? ('Connected: ' + (s.device || '')) : (s.error || 'Disconnected');

@@ -13,6 +13,7 @@ Then open: http://localhost:5000
 import os
 import json
 import time
+import copy
 import threading
 import logging
 import numpy as np
@@ -688,29 +689,54 @@ class BridgeEngine:
         return self.actions.invoke(action_id, value=value, **kwargs)
 
     def _save_midi_config(self, cfg):
+        """Persist config after MIDI learn/unmap without restarting MIDI I/O."""
         self.config = cfg
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg, f, indent=2)
+
+    def _merge_midi_preserve(self, incoming: dict) -> dict:
+        """Keep learned mappings / device if the client sent a stale empty midi block."""
+        existing = (self.config or {}).get("midi") or {}
+        midi = dict(incoming.get("midi") or {})
+        existing_maps = existing.get("mappings") or []
+        incoming_maps = midi.get("mappings") or []
+        # Stale UI save often has mappings: [] while the server still has learns
+        if existing_maps and not incoming_maps:
+            midi["mappings"] = copy.deepcopy(existing_maps)
+        if existing.get("device") and not midi.get("device"):
+            midi["device"] = existing["device"]
+        # Don't let a stale enabled:false kill a live connection / saved preference
+        # unless the client explicitly included midi.enabled (always present in our UI).
+        # Prefer existing enabled when incoming disables but mappings were also wiped.
+        if existing.get("enabled") and not midi.get("enabled") and existing_maps and not incoming_maps:
+            midi["enabled"] = True
+        incoming = dict(incoming)
+        incoming["midi"] = midi
+        return incoming
 
     def _load_config(self):
         if CONFIG_FILE.exists():
             try:
                 with open(CONFIG_FILE) as f:
-                    cfg = DEFAULT_CONFIG.copy()
+                    cfg = copy.deepcopy(DEFAULT_CONFIG)
                     loaded = json.load(f)
                     cfg.update(loaded)
                     # Deep-merge nested dicts we care about
                     for key in ("kick_strobe", "tempo", "midi"):
                         if key in loaded and isinstance(loaded[key], dict):
-                            base = DEFAULT_CONFIG.get(key, {}).copy()
+                            base = copy.deepcopy(DEFAULT_CONFIG.get(key, {}))
                             base.update(loaded[key])
+                            # Ensure mappings list survives
+                            if key == "midi" and "mappings" in loaded[key]:
+                                base["mappings"] = copy.deepcopy(loaded[key]["mappings"])
                             cfg[key] = base
                     return cfg
             except Exception:
                 pass
-        return DEFAULT_CONFIG.copy()
+        return copy.deepcopy(DEFAULT_CONFIG)
 
     def save_config(self, cfg):
+        cfg = self._merge_midi_preserve(cfg)
         self.config = cfg
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg, f, indent=2)
@@ -726,9 +752,14 @@ class BridgeEngine:
             self.set_kick_strobe(True)
         midi_cfg = cfg.get("midi", {})
         if midi_cfg.get("enabled"):
-            self.midi.start(midi_cfg.get("device", ""))
+            # Only (re)start if not already on the same device
+            want = midi_cfg.get("device", "")
+            if not (self.midi.active and self.midi.port_name and
+                    (not want or want.lower() in (self.midi.port_name or "").lower())):
+                self.midi.start(want)
         else:
-            self.midi.stop()
+            if self.midi.active:
+                self.midi.stop()
 
     def start(self):
         if self.running:
@@ -1324,9 +1355,11 @@ def api_midi_start():
     data = request.json or {}
     device = data.get("device", engine.config.get("midi", {}).get("device", ""))
     ok = engine.midi.start(device)
-    engine.config.setdefault("midi", {})["enabled"] = ok
-    engine.config["midi"]["device"] = engine.midi.port_name or device
-    engine.save_config(engine.config)
+    midi = engine.config.setdefault("midi", {})
+    midi["enabled"] = ok
+    midi["device"] = engine.midi.port_name or device
+    # Preserve mappings; only write midi fields
+    engine._save_midi_config(engine.config)
     return jsonify({"ok": ok, **engine.midi.state()})
 
 
@@ -1334,7 +1367,7 @@ def api_midi_start():
 def api_midi_stop():
     engine.midi.stop()
     engine.config.setdefault("midi", {})["enabled"] = False
-    engine.save_config(engine.config)
+    engine._save_midi_config(engine.config)
     return jsonify({"ok": True, **engine.midi.state()})
 
 
