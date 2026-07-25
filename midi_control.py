@@ -1,15 +1,77 @@
 """
 MIDI input controller with learn mode and soft takeover.
+
+Uses mido with automatic backend selection:
+  1. python-rtmidi (best when available)
+  2. pygame      (Windows-friendly wheels — preferred install path)
+  3. rtmidi_python (legacy fallback)
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 from typing import Callable
 
 log = logging.getLogger("pixel-mapping-osc")
+
+# Tried in order. pygame ships Windows wheels and avoids compiling python-rtmidi.
+_BACKENDS = (
+    "mido.backends.rtmidi",
+    "mido.backends.pygame",
+    "mido.backends.rtmidi_python",
+)
+
+_backend_name: str | None = None
+_backend_error: str | None = None
+
+
+def _ensure_backend():
+    """Import mido and select a working MIDI backend. Cached after first call."""
+    global _backend_name, _backend_error
+    if _backend_name:
+        import mido
+        return mido
+
+    try:
+        import mido
+    except Exception as e:
+        _backend_error = (
+            f"mido not installed ({e}). Run: pip install mido pygame"
+        )
+        raise RuntimeError(_backend_error) from e
+
+    # Honour explicit override
+    forced = os.environ.get("MIDO_BACKEND", "").strip()
+    candidates = (forced,) if forced else _BACKENDS
+
+    errors = []
+    for backend in candidates:
+        if not backend:
+            continue
+        try:
+            mido.set_backend(backend)
+            # Probe — get_input_names must succeed (empty list is OK)
+            mido.get_input_names()
+            _backend_name = backend
+            _backend_error = None
+            log.info(f"MIDI backend: {backend}")
+            return mido
+        except Exception as e:
+            errors.append(f"{backend}: {e}")
+            log.debug(f"MIDI backend {backend} unavailable: {e}")
+
+    _backend_error = (
+        "No working MIDI backend. On Windows install pygame (recommended):\n"
+        "  pip install mido pygame\n"
+        "Or try python-rtmidi on Python 3.11/3.12:\n"
+        "  pip install --upgrade pip setuptools wheel\n"
+        "  pip install python-rtmidi\n"
+        "Tried: " + " | ".join(errors)
+    )
+    raise RuntimeError(_backend_error)
 
 
 class MidiController:
@@ -23,23 +85,24 @@ class MidiController:
         self.error = None
         self.learning = None  # action_id being learned, or None
         self.last_event = None
+        self.backend = None
         self._thread = None
         self._stop = threading.Event()
-        self._pickup: dict[str, float] = {}  # mapping key -> last soft value
+        self._pickup: dict[str, float] = {}
         self._pickup_armed: dict[str, bool] = {}
 
     @staticmethod
     def list_inputs(rescan=False):
         try:
-            import mido
-        except Exception:
-            return {"error": "mido not installed — run: pip install mido python-rtmidi",
-                    "devices": []}
-        try:
+            mido = _ensure_backend()
             names = mido.get_input_names()
-            return {"error": None, "devices": [{"index": i, "name": n} for i, n in enumerate(names)]}
+            return {
+                "error": None,
+                "backend": _backend_name,
+                "devices": [{"index": i, "name": n} for i, n in enumerate(names)],
+            }
         except Exception as e:
-            return {"error": str(e), "devices": []}
+            return {"error": str(e), "backend": None, "devices": []}
 
     def start(self, device_name: str | None = None):
         self.stop()
@@ -47,9 +110,10 @@ class MidiController:
         cfg = self.get_config().get("midi", {})
         name = device_name if device_name is not None else cfg.get("device", "")
         try:
-            import mido
-        except Exception:
-            self.error = "mido not installed — run: pip install mido python-rtmidi"
+            mido = _ensure_backend()
+            self.backend = _backend_name
+        except Exception as e:
+            self.error = str(e)
             return False
         try:
             target = None
@@ -69,7 +133,7 @@ class MidiController:
                     return False
             else:
                 if not names:
-                    self.error = "No MIDI input devices found"
+                    self.error = "No MIDI input devices found — plug in a controller and click Refresh"
                     return False
                 target = names[0]
 
@@ -79,7 +143,7 @@ class MidiController:
             self._stop.clear()
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
-            log.info(f'MIDI listening on "{target}"')
+            log.info(f'MIDI listening on "{target}" via {_backend_name}')
             return True
         except Exception as e:
             self.error = f"MIDI open failed: {e}"
@@ -129,6 +193,7 @@ class MidiController:
             "learning": self.learning,
             "last_event": self.last_event,
             "mappings": cfg.get("mappings", []),
+            "backend": self.backend or _backend_name,
         }
 
     def _msg_key(self, msg) -> dict | None:
@@ -163,7 +228,6 @@ class MidiController:
             "t": time.time(),
         }
 
-        # Learn mode — bind on note_on or cc
         if self.learning and key["type"] in ("note", "cc"):
             action_id = self.learning
             self.learning = None
@@ -178,7 +242,6 @@ class MidiController:
             cfg = self.get_config()
             midi = cfg.setdefault("midi", {})
             mappings = [m for m in midi.get("mappings", []) if m.get("action") != action_id]
-            # conflict warning: same physical control
             conflict = next(
                 (m for m in mappings
                  if m.get("type") == mapping["type"]
@@ -199,7 +262,7 @@ class MidiController:
             return
 
         if key["type"] == "note_off":
-            return  # ignore note offs for now (momentary release reserved)
+            return
 
         cfg = self.get_config().get("midi", {})
         mappings = cfg.get("mappings", [])
@@ -215,30 +278,24 @@ class MidiController:
         invert = bool(mapping.get("invert", False))
 
         if mapping["type"] == "note":
-            # trigger / toggle on note on
             try:
                 self.on_action(action_id)
             except Exception as e:
                 log.warning(f"MIDI action {action_id}: {e}")
             return
 
-        # CC continuous or button-like
         raw = float(msg.value) / 127.0
         if invert:
             raw = 1.0 - raw
 
-        # Soft takeover for absolute faders
         if mode == "absolute" and mapping.get("pickup", True):
             pk = f"{mapping['channel']}:{mapping['number']}:{action_id}"
             if pk not in self._pickup_armed:
                 self._pickup_armed[pk] = False
                 self._pickup[pk] = raw
             if not self._pickup_armed[pk]:
-                # wait until fader crosses last known output — approximate with hysteresis
                 prev = self._pickup.get(pk, raw)
                 if abs(raw - prev) < 0.02 or abs(raw - prev) > 0.15:
-                    # first move after connect: require close approach
-                    # Store target from last invoke if any — for simplicity arm after small move
                     self._pickup[pk] = raw
                     if abs(raw - prev) >= 0.01:
                         self._pickup_armed[pk] = True

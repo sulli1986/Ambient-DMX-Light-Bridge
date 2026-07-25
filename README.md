@@ -374,10 +374,26 @@ Spectrum analyzer uses the same audio input as kick strobe (FFT bands).
 
 The **MIDI** tab maps any note or CC to the same action registry as webhooks.
 
-1. `pip install mido python-rtmidi`
-2. Connect a controller, pick the input, click **Connect**
-3. Click **Learn** next to an action, then move a pad/knob/fader
-4. Mappings save into `config.json` under `midi.mappings`
+### Install (Windows)
+
+Skip `python-rtmidi` — it often fails to build. Use **pygame** instead (has Windows wheels):
+
+```bash
+pip install mido pygame
+```
+
+Then restart the app. The MIDI tab should list your controller. Backend order:
+
+1. `python-rtmidi` if present  
+2. **pygame** (recommended on Windows)  
+3. `rtmidi_python` fallback  
+
+### Use
+
+1. Plug in your MIDI controller  
+2. Open the **MIDI** tab → **Refresh** → select the device → **Connect**  
+3. Click **Learn** next to an action, then press a pad or move a knob  
+4. Mappings save into `config.json` under `midi.mappings`  
 
 Faders use soft takeover so connecting a controller won't jump levels.
 
