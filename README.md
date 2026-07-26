@@ -408,7 +408,8 @@ Faders use soft takeover so connecting a controller won't jump levels.
 
 ## Kick Strobe (Dante / audio input)
 
-Flashes every fixture white on each kick drum hit, then returns to ambient
+Flashes every fixture with the **current screen primary colour** (full-bright,
+same hue as that fixture's zone) on each kick drum hit, then returns to ambient
 pixel colours. Designed for an isolated kick channel arriving over
 **Dante Virtual Soundcard** (any audio input device works).
 

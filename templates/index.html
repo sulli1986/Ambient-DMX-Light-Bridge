@@ -885,7 +885,8 @@
         <div class="panel-body">
 
           <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
-            Flashes all fixtures white on every kick drum hit. Feed the kick mic to this machine
+            Flashes all fixtures with the current screen primary colour on every
+            kick drum hit (boosted full-bright, same hue as the background). Feed the kick mic to this machine
             on an audio input channel — e.g. patch it to a Dante Virtual Soundcard channel from
             the console — then pick the device and channel below. Set the threshold so the red
             marker sits above the bleed but below the kick peaks on the live meter.
@@ -1306,7 +1307,7 @@ async function toggleKick() {
   if (dirty) await saveConfig(true);  // apply device/threshold edits first
   const r = await fetch('/api/kick-toggle', { method: 'POST' });
   const d = await r.json();
-  if (d.kick_enabled) toast('Kick strobe enabled — flashing on hits', 'success');
+  if (d.kick_enabled) toast('Kick strobe enabled — colour flash on hits', 'success');
   else if (d.error) toast('Kick strobe: ' + d.error, 'error');
   else toast('Kick strobe disabled', 'success');
 }

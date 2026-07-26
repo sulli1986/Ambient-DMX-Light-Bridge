@@ -834,17 +834,45 @@ class BridgeEngine:
             self.flash_until = 0.0
         return self.kick_enabled
 
+    def _flash_colour_for(self, name: str) -> tuple[int, int, int]:
+        """
+        Primary colour for a kick flash: that fixture's current screen colour,
+        boosted to full intensity so the hit still punches. Falls back to the
+        stage-wide brightest colour, then warm white.
+        """
+        src = self.output_colours.get(name) or self.current_colours.get(name)
+        if src and max(src[:3]) > 8:
+            r, g, b = src[0], src[1], src[2]
+        else:
+            # Stage primary — brightest recent ambient sample
+            br = self._brightest()
+            r, g, b = br[0], br[1], br[2]
+            if max(r, g, b) < 8:
+                return (255, 220, 180)
+
+        peak = max(r, g, b)
+        if peak <= 0:
+            return (255, 220, 180)
+        # Boost to full brightness, keep hue ratio
+        scale = 255.0 / peak
+        return (
+            min(255, int(r * scale)),
+            min(255, int(g * scale)),
+            min(255, int(b * scale)),
+        )
+
     def _on_kick(self):
         """Fired per kick hit (from the detector's dispatch thread):
-        flash all fixtures white immediately, without waiting for the
-        frame loop, then let ambient colours resume after flash_ms."""
+        flash all fixtures with the current screen primary colour immediately,
+        then let ambient colours resume after flash_ms."""
         if not (self.running and self.enabled and self.kick_enabled and self.osc):
             return
         flash_ms = self.config.get("kick_strobe", {}).get("flash_ms", 60)
         self.flash_until = time.time() + flash_ms / 1000.0
         for fx in self._get_all_fixtures():
+            r, g, b = self._flash_colour_for(fx["name"])
             self.osc.send_fixture(
-                fx["name"], rgb_to_channels(255, 255, 255, fx["type"])
+                fx["name"], rgb_to_channels(r, g, b, fx["type"])
             )
 
     def toggle(self):
@@ -994,7 +1022,7 @@ class BridgeEngine:
         composed = self.effects.composite(ambient)
         self.output_colours = composed
 
-        # During a kick flash the white values were already sent from the
+        # During a kick flash the colour values were already sent from the
         # detector thread — hold off so ambient doesn't overwrite them.
         if self.enabled and self.osc and time.time() >= self.flash_until:
             for fx in fixtures:
