@@ -30,7 +30,12 @@ Edit `config.json` for your Lightkey IP, fixtures, etc. if needed.
 python app.py
 ```
 
-Open: http://localhost:5000
+This starts the bridge **and** the compact always-on-top Lights strip
+(no full browser opens automatically). Drag the strip beside ProPresenter.
+
+Full setup UI when needed: http://localhost:5000
+
+To open only the companion later: `python companion.py` (bridge must already be running).
 
 ## 4. MIDI setup
 

@@ -1577,10 +1577,36 @@ def api_static_send():
 
 
 if __name__ == "__main__":
-    import webbrowser
+    import subprocess
+    import sys
+
     print("\n" + "=" * 50)
     print("  Pixel Mapping to OSC")
-    print("  Open: http://localhost:5000")
+    print("  Companion strip launching…")
+    print("  Full UI: http://localhost:5000")
     print("=" * 50 + "\n")
-    threading.Timer(1.2, lambda: webbrowser.open("http://localhost:5000")).start()
+
+    def _start_companion():
+        companion = Path(__file__).resolve().parent / "companion.py"
+        if not companion.exists():
+            log.warning("companion.py not found — skip mini control")
+            return
+        try:
+            # Separate process so the Tk UI has its own main thread
+            flags = 0
+            if sys.platform == "win32":
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen(
+                [sys.executable, str(companion)],
+                cwd=str(companion.parent),
+                creationflags=flags,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            log.info("Companion control strip started")
+        except Exception as e:
+            log.warning(f"Could not start companion: {e}")
+
+    # Wait briefly so Flask is accepting connections before the strip polls
+    threading.Timer(1.0, _start_companion).start()
     app.run(host="0.0.0.0", port=5000, debug=False)

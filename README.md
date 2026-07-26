@@ -473,6 +473,7 @@ pixel-mapping-to-osc/
 ├── app.py                  # Flask server + bridge engine
 ├── effects.py              # Generative effects, scenes, compositor
 ├── actions.py              # Shared action registry (UI / webhooks / MIDI)
+├── companion.py            # Tiny always-on-top control strip (beside ProPresenter)
 ├── midi_control.py         # MIDI input, learn, soft takeover
 ├── winmm_midi.py           # Windows-native MIDI (no compile)
 ├── tempo.py                # BPM / tap-tempo clock
