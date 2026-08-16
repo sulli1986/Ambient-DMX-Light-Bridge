@@ -1076,7 +1076,10 @@ class BridgeEngine:
             t0 = time.time()
             frame = self.capture.grab_frame()
             if frame is not None:
-                self._process_frame(frame)
+                try:
+                    self._process_frame(frame)
+                except Exception as e:
+                    log.warning(f"Frame processing failed: {e}")
 
             # Static controls — off when paused or fog disabled
             if self.enabled and self.fog_enabled:

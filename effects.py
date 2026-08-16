@@ -14,6 +14,9 @@ import random
 import time
 from copy import deepcopy
 from typing import Callable
+import logging
+
+log = logging.getLogger("pixel-mapping-osc")
 
 
 EFFECT_DEFS = {
@@ -79,7 +82,7 @@ EFFECT_DEFS = {
             "intensity": {"min": 0.0, "max": 1.0, "default": 1.0},
             "density": {"min": 0.02, "max": 0.5, "default": 0.12},
         },
-        "blend": "add",
+        "blend": "htp",
     },
     "bump": {
         "label": "Bump on Beat",
@@ -502,11 +505,12 @@ class EffectEngine:
         elif eid == "fire":
             inten = p.get("intensity", 0.9)
             warmth = p.get("warmth", 0.85)
+            fire_state = inst._fire_state
             for name in names:
-                prev = self._fire_state.get(name, 0.6)
+                prev = fire_state.get(name, 0.6)
                 target = 0.35 + 0.65 * inst._rng.random()
                 level = prev * 0.55 + target * 0.45
-                self._fire_state[name] = level
+                fire_state[name] = level
                 src = _src_colour(name, ambient, names)
                 wr, wg, wb = src
                 wr = int(wr * (0.6 + 0.4 * warmth) + 255 * 0.25 * warmth)
@@ -517,21 +521,26 @@ class EffectEngine:
         elif eid == "sparkle":
             dens = p.get("density", 0.12)
             inten = p.get("intensity", 1.0)
+            sparkle_state = inst._sparkle_state
+            spd = max(0.2, float(speed) if speed else 1.0)
             for name in names:
-                life = self._sparkle_state.get(name, 0.0)
-                if life <= 0 and inst._rng.random() < dens * 0.15 * speed:
+                life = sparkle_state.get(name, 0.0)
+                if life <= 0 and inst._rng.random() < dens * 0.15 * spd:
                     life = 1.0
-                life = max(0.0, life - 0.08 * speed)
-                self._sparkle_state[name] = life
+                life = max(0.0, life - 0.08 * spd)
+                sparkle_state[name] = life
                 src = _src_colour(name, ambient, names)
                 out[name] = _boost_rgb(src, life * inten) if life > 0 else (0, 0, 0)
 
         elif eid == "bump":
-            hold = p.get("hold", 0.08)
+            hold = max(0.02, float(p.get("hold", 0.08) or 0.08))
             inten = p.get("intensity", 1.0)
-            age = min(phase, kick_age if kick_age < 1.0 else phase)
-            if age < hold or kick_punch > 0:
-                fall = max(kick_punch, 1.0 - (age / max(hold, 0.001)))
+            age = phase
+            if kick_age < 1.0:
+                age = min(phase, kick_age)
+            punch = kick_punch > 0.05
+            if age < hold or punch:
+                fall = kick_punch if punch else max(0.0, 1.0 - (age / hold))
                 for name in names:
                     src = _src_colour(name, ambient, names)
                     out[name] = _boost_rgb(src, fall * inten)
@@ -614,13 +623,14 @@ class EffectEngine:
             for name in names:
                 if name not in result:
                     result[name] = (0, 0, 0)
-            overlay = self._gen(inst, names, now, result)
-            amount = inst.params.get("intensity", 1.0)
-            # intensity already baked into most gens; use full blend amount
-            blend_amt = 1.0 if inst.blend != "multiply" else 1.0
+            try:
+                overlay = self._gen(inst, names, now, result)
+            except Exception as e:
+                log.warning(f"Effect {inst.effect_id} failed: {e}")
+                continue
             for name, rgb in overlay.items():
                 base = result.get(name, (0, 0, 0))
-                result[name] = _blend(base, rgb, inst.blend, blend_amt)
+                result[name] = _blend(base, rgb, inst.blend, 1.0)
 
         # Solo / highlight
         if self.solo_group:
