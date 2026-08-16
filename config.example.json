@@ -14,9 +14,26 @@
     "bpm": 120
   },
   "midi": {
-    "device": "",
-    "enabled": false,
-    "mappings": []
+    "device": "APC",
+    "enabled": true,
+    "mappings": [
+      {
+        "action": "kick_toggle",
+        "type": "note",
+        "channel": 0,
+        "number": 36,
+        "mode": "toggle",
+        "invert": false
+      },
+      {
+        "action": "master_brightness",
+        "type": "cc",
+        "channel": 0,
+        "number": 7,
+        "mode": "absolute",
+        "invert": false
+      }
+    ]
   },
   "kick_strobe": {
     "device": "Dante",
@@ -24,7 +41,8 @@
     "threshold": 0.5,
     "gain": 1.0,
     "debounce_ms": 150,
-    "flash_ms": 60
+    "flash_ms": 60,
+    "target": "bottom"
   },
   "groups": [
     {
@@ -38,8 +56,36 @@
       "mirror": false
     }
   ],
-  "scenes": [],
-  "palettes": [],
+  "scenes": [
+    {
+      "name": "Warm Wash",
+      "group": "Front Wash",
+      "fade_ms": 800,
+      "colours": {
+        "P1": [255, 160, 80],
+        "P2": [255, 160, 80],
+        "P3": [255, 140, 60]
+      }
+    }
+  ],
+  "palettes": [
+    {
+      "name": "Worship Warm",
+      "colours": [
+        [255, 140, 40],
+        [255, 80, 40],
+        [220, 40, 80]
+      ]
+    },
+    {
+      "name": "Cool Night",
+      "colours": [
+        [40, 80, 255],
+        [80, 40, 180],
+        [20, 160, 200]
+      ]
+    }
+  ],
   "fixtures": [
     {
       "name": "P1",

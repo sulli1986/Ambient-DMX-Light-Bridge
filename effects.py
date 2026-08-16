@@ -41,7 +41,6 @@ EFFECT_DEFS = {
         "params": {
             "speed": {"min": 0.1, "max": 4.0, "default": 1.0},
             "intensity": {"min": 0.0, "max": 1.0, "default": 1.0},
-            "hue": {"min": 0.0, "max": 1.0, "default": 0.55},
             "width": {"min": 0.05, "max": 1.0, "default": 0.35},
         },
         "blend": "replace",
@@ -49,12 +48,11 @@ EFFECT_DEFS = {
     "pulse": {
         "label": "Pulse / Breathe",
         "params": {
-            "speed": {"min": 0.05, "max": 3.0, "default": 0.5},
-            "intensity": {"min": 0.0, "max": 1.0, "default": 0.8},
-            "depth": {"min": 0.0, "max": 1.0, "default": 0.7},
-            "hue": {"min": 0.0, "max": 1.0, "default": 0.08},
+            "speed": {"min": 0.05, "max": 3.0, "default": 1.0},
+            "intensity": {"min": 0.0, "max": 1.5, "default": 1.35},
+            "depth": {"min": 0.0, "max": 1.0, "default": 0.45},
         },
-        "blend": "multiply",
+        "blend": "htp",
     },
     "strobe": {
         "label": "Strobe",
@@ -100,6 +98,23 @@ EFFECT_DEFS = {
         },
         "blend": "replace",
     },
+    "alternate": {
+        "label": "Alternate",
+        "params": {
+            "speed": {"min": 0.25, "max": 4.0, "default": 1.0},
+            "intensity": {"min": 0.0, "max": 1.5, "default": 1.2},
+        },
+        "blend": "replace",
+    },
+    "bounce": {
+        "label": "Bounce",
+        "params": {
+            "speed": {"min": 0.1, "max": 4.0, "default": 1.0},
+            "intensity": {"min": 0.0, "max": 1.0, "default": 1.0},
+            "size": {"min": 0.05, "max": 0.8, "default": 0.3},
+        },
+        "blend": "replace",
+    },
 }
 
 
@@ -110,6 +125,51 @@ def _clamp(v, lo=0.0, hi=1.0):
 def _hsv(h, s, v):
     r, g, b = colorsys.hsv_to_rgb(h % 1.0, _clamp(s), _clamp(v))
     return (int(r * 255), int(g * 255), int(b * 255))
+
+
+def _boost_rgb(rgb, amount=1.0):
+    r, g, b = int(rgb[0]), int(rgb[1]), int(rgb[2])
+    peak = max(r, g, b)
+    if peak <= 0:
+        return (0, 0, 0)
+    scale = (255.0 / peak) * max(0.0, amount)
+    return (
+        min(255, int(r * scale)),
+        min(255, int(g * scale)),
+        min(255, int(b * scale)),
+    )
+
+
+def _scale_rgb(rgb, amount=1.0):
+    a = max(0.0, amount)
+    return (
+        min(255, int(rgb[0] * a)),
+        min(255, int(rgb[1] * a)),
+        min(255, int(rgb[2] * a)),
+    )
+
+
+def _src_colour(name, ambient: dict, names: list[str]) -> tuple[int, int, int]:
+    """Fixture screen colour, or the brightest colour in the group."""
+    c = ambient.get(name)
+    if c and max(c[:3]) > 12:
+        return (int(c[0]), int(c[1]), int(c[2]))
+    best = (255, 180, 80)
+    best_v = 0
+    for n in names:
+        cc = ambient.get(n)
+        if cc:
+            v = max(cc[:3])
+            if v > best_v:
+                best_v = v
+                best = (int(cc[0]), int(cc[1]), int(cc[2]))
+    return best
+
+
+def _shift_hue(rgb, delta):
+    r, g, b = [x / 255.0 for x in rgb[:3]]
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    return _hsv(h + delta, max(0.35, s), max(0.35, v))
 
 
 def _blend(base, overlay, mode, amount=1.0):
@@ -372,7 +432,7 @@ class EffectEngine:
 
     # ---- generators ----
 
-    def _gen(self, inst: EffectInstance, names: list[str], now: float) -> dict:
+    def _gen(self, inst: EffectInstance, names: list[str], now: float, ambient: dict) -> dict:
         eid = inst.effect_id
         p = inst.params
         n = max(1, len(names))
@@ -380,55 +440,64 @@ class EffectEngine:
         phase = self.tempo.beat_phase(now)
         speed = p.get("speed", 1.0)
         t = beats * speed if inst.bpm_sync else (now - inst.started_at) * speed
+        kick_age = self.tempo.kick_age(now) if hasattr(self.tempo, "kick_age") else 999.0
+        kick_punch = max(0.0, 1.0 - kick_age / 0.14)
 
         out = {}
         if eid == "chase":
             pos = t % n
             size = p.get("size", 0.25) * n
-            hue = p.get("hue", 0.08)
             inten = p.get("intensity", 1.0)
             for i, name in enumerate(names):
                 dist = min((i - pos) % n, (pos - i) % n)
                 fall = max(0.0, 1.0 - dist / max(0.5, size))
-                out[name] = _hsv(hue, 0.95, fall * inten) if fall > 0 else (0, 0, 0)
+                src = _src_colour(name, ambient, names)
+                out[name] = _boost_rgb(src, (fall * inten) + 0.25 * kick_punch * fall) if fall > 0 else (0, 0, 0)
 
         elif eid == "rainbow":
             spread = p.get("spread", 1.0)
             inten = p.get("intensity", 1.0)
             for i, name in enumerate(names):
-                h = (t * 0.15 + (i / n) * spread) % 1.0
-                out[name] = _hsv(h, 1.0, inten)
+                src = _src_colour(name, ambient, names)
+                delta = (t * 0.15 + (i / n) * spread) % 1.0
+                shifted = _shift_hue(src, delta)
+                out[name] = _boost_rgb(shifted, inten)
 
         elif eid == "wipe":
             width = p.get("width", 0.35)
-            hue = p.get("hue", 0.55)
             inten = p.get("intensity", 1.0)
             center = (t * 0.5) % (1.0 + width) - width * 0.5
             for i, name in enumerate(names):
                 x = i / max(1, n - 1)
                 d = abs(x - center)
                 fall = max(0.0, 1.0 - d / max(0.05, width))
-                out[name] = _hsv(hue, 0.9, fall * inten)
+                src = _src_colour(name, ambient, names)
+                out[name] = _boost_rgb(src, fall * inten) if fall > 0 else (0, 0, 0)
 
         elif eid == "pulse":
-            depth = p.get("depth", 0.7)
-            hue = p.get("hue", 0.08)
-            inten = p.get("intensity", 0.8)
-            wave = 0.5 + 0.5 * math.sin(t * math.pi * 2)
-            level = inten * ((1.0 - depth) + depth * wave)
-            colour = _hsv(hue, 0.7, level)
+            depth = p.get("depth", 0.45)
+            inten = p.get("intensity", 1.35)
+            if inst.bpm_sync:
+                wave = 0.5 + 0.5 * math.cos(phase * math.pi * 2)
+            else:
+                wave = 0.5 + 0.5 * math.sin(t * math.pi * 2)
+            wave = min(1.0, wave + 0.55 * kick_punch)
+            level = (1.0 - depth) + depth * wave
             for name in names:
-                out[name] = colour
+                src = _src_colour(name, ambient, names)
+                out[name] = _boost_rgb(src, inten * level)
 
         elif eid == "strobe":
             duty = p.get("duty", 0.15)
             inten = p.get("intensity", 1.0)
-            # speed is flashes per beat when bpm_sync, else Hz-ish via t
             flash_phase = (t % 1.0) if inst.bpm_sync else ((now * speed) % 1.0)
-            on = flash_phase < duty
-            colour = (int(255 * inten), int(255 * inten), int(255 * inten)) if on else (0, 0, 0)
+            on = flash_phase < duty or kick_punch > 0.4
             for name in names:
-                out[name] = colour
+                if on:
+                    src = _src_colour(name, ambient, names)
+                    out[name] = _boost_rgb(src, inten)
+                else:
+                    out[name] = (0, 0, 0)
 
         elif eid == "fire":
             inten = p.get("intensity", 0.9)
@@ -438,11 +507,12 @@ class EffectEngine:
                 target = 0.35 + 0.65 * inst._rng.random()
                 level = prev * 0.55 + target * 0.45
                 self._fire_state[name] = level
-                level *= inten
-                r = int(255 * level)
-                g = int(80 * level * (0.4 + 0.6 * warmth))
-                b = int(10 * level * (1.0 - warmth))
-                out[name] = (r, g, b)
+                src = _src_colour(name, ambient, names)
+                wr, wg, wb = src
+                wr = int(wr * (0.6 + 0.4 * warmth) + 255 * 0.25 * warmth)
+                wg = int(wg * (0.5 + 0.3 * warmth))
+                wb = int(wb * (1.0 - 0.5 * warmth))
+                out[name] = _scale_rgb((min(255, wr), min(255, wg), min(255, wb)), level * inten)
 
         elif eid == "sparkle":
             dens = p.get("density", 0.12)
@@ -453,22 +523,21 @@ class EffectEngine:
                     life = 1.0
                 life = max(0.0, life - 0.08 * speed)
                 self._sparkle_state[name] = life
-                v = life * inten
-                out[name] = (int(255 * v), int(255 * v), int(240 * v)) if v > 0 else (0, 0, 0)
+                src = _src_colour(name, ambient, names)
+                out[name] = _boost_rgb(src, life * inten) if life > 0 else (0, 0, 0)
 
         elif eid == "bump":
             hold = p.get("hold", 0.08)
-            hue = p.get("hue", 0.0)
             inten = p.get("intensity", 1.0)
-            # bright near start of beat
-            age = phase  # 0 at downbeat
-            if age < hold:
-                fall = 1.0 - (age / hold)
-                out_c = _hsv(hue, 0.2 if hue < 0.02 else 0.9, fall * inten)
+            age = min(phase, kick_age if kick_age < 1.0 else phase)
+            if age < hold or kick_punch > 0:
+                fall = max(kick_punch, 1.0 - (age / max(hold, 0.001)))
+                for name in names:
+                    src = _src_colour(name, ambient, names)
+                    out[name] = _boost_rgb(src, fall * inten)
             else:
-                out_c = (0, 0, 0)
-            for name in names:
-                out[name] = out_c
+                for name in names:
+                    out[name] = (0, 0, 0)
 
         elif eid == "spectrum":
             bands = self.get_spectrum()
@@ -479,15 +548,34 @@ class EffectEngine:
                 bi = int(i / n * nb) if n else 0
                 bi = min(nb - 1, bi)
                 level = _clamp((bands[bi] if bands else 0.0) * sens)
-                # cool→warm across bar
-                h = 0.65 - 0.55 * (i / max(1, n - 1))
-                out[name] = _hsv(h, 0.95, level * inten)
+                src = _src_colour(name, ambient, names)
+                out[name] = _boost_rgb(src, level * inten)
+
+        elif eid == "alternate":
+            inten = p.get("intensity", 1.2)
+            side = int(t) % 2
+            if kick_punch > 0.5:
+                side = 1 - side
+            for i, name in enumerate(names):
+                src = _src_colour(name, ambient, names)
+                on = (i % 2) == side
+                out[name] = _boost_rgb(src, inten if on else inten * 0.15)
+
+        elif eid == "bounce":
+            size = p.get("size", 0.3) * n
+            inten = p.get("intensity", 1.0)
+            tri = abs((t % 2.0) - 1.0)
+            pos = tri * (n - 1)
+            for i, name in enumerate(names):
+                dist = abs(i - pos)
+                fall = max(0.0, 1.0 - dist / max(0.5, size))
+                src = _src_colour(name, ambient, names)
+                out[name] = _boost_rgb(src, fall * inten) if fall > 0 else (0, 0, 0)
 
         else:
             for name in names:
                 out[name] = (0, 0, 0)
 
-        # optional mirror: average with mirrored index
         cfg = self.get_config()
         for g in cfg.get("groups", []):
             if g.get("name") == inst.group and g.get("mirror"):
@@ -526,7 +614,7 @@ class EffectEngine:
             for name in names:
                 if name not in result:
                     result[name] = (0, 0, 0)
-            overlay = self._gen(inst, names, now)
+            overlay = self._gen(inst, names, now, result)
             amount = inst.params.get("intensity", 1.0)
             # intensity already baked into most gens; use full blend amount
             blend_amt = 1.0 if inst.blend != "multiply" else 1.0

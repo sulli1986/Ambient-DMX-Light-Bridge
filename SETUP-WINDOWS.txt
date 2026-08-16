@@ -39,19 +39,21 @@ To open only the companion later: `python companion.py` (bridge must already be 
 
 ## 4. MIDI setup
 
+MIDI starts automatically when you run `python app.py`.
+You do **not** need to install pygame or python-rtmidi.
+
+First time only:
 1. Plug in your MIDI controller
-2. Open the **MIDI** tab in the browser UI
-3. Click **Refresh**
-4. Select your device
-5. Click **Connect**
-6. Click **Learn** next to an action, then press a pad or move a knob/fader
+2. Open http://localhost:5000 → **MIDI** tab
+3. Select the device if it is not already connected
+4. Click **Learn** next to each action, then press a pad or move a knob
 
-Mappings save automatically into `config.json` under `midi.mappings`.
-After Connect, leave the app running or restart — MIDI should auto-reconnect if
-`midi.enabled` is true in `config.json`.
+After that, mappings and the device name stay in `config.json`.
+On every launch the app reconnects by itself (and keeps retrying if the
+controller is plugged in a few seconds late).
 
-Do not worry about clicking **Save Changes** for MIDI; learns write to disk
-immediately. Saving other settings will no longer wipe MIDI maps.
+Click **Disconnect** only if you want MIDI off for this session.
+
 
 ## Quick checklist
 

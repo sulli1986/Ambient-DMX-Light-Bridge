@@ -69,7 +69,9 @@ cp config.example.json config.json
 python app.py
 ```
 
-A browser window opens automatically at `http://localhost:5000`.
+A browser window does **not** open automatically. `python app.py` starts the
+bridge and a compact always-on-top **Lights** strip. Full UI:
+`http://localhost:5000`.
 
 ---
 
@@ -165,6 +167,14 @@ All settings are saved in `config.json`. You can edit this directly or use the b
 | `white_mode` | `"min"` | White extraction method: `"min"` = neutral white, `"none"` = no white channel |
 | `min_output` | `40` | Floor — no light drops below this value (0 to disable) |
 | `stage_floor_pct` | `50` | % of lights kept lit on dark scenes (raises floor automatically when much of the stage is dark) |
+| `tempo.bpm` | `120` | Shared BPM for beat-synced effects; tap tempo updates this |
+| `groups` | `[]` | Named ordered fixture lists for chase/wipe/solo (`name`, `fixtures`, `mirror`) |
+| `scenes` | `[]` | Saved looks: `name`, optional `group`, `fade_ms`, `colours` map of fixture → `[r,g,b]` |
+| `palettes` | `[]` | Named colour sets (`name` + `colours` RGB lists) for intentional looks |
+| `midi.device` | `""` | MIDI input name substring (stable; not a port index) |
+| `midi.enabled` | `false` | Auto-open MIDI on launch (set true after a successful Connect) |
+| `midi.mappings` | `[]` | Learned maps: `action`, `type` (`note`/`cc`), `channel`, `number`, `mode` |
+| `kick_strobe` | — | Audio device, channel, threshold, gain, debounce, flash duration |
 
 
 ### Zone coordinates
@@ -360,13 +370,61 @@ Test tab for your machine's IP filled in, or `GET /api/actions` for the full lis
 Ambient screen-follow remains the base layer. Effects composite on top and are
 **off by default** — existing configs keep working unchanged.
 
-1. **Groups** — ordered fixture lists for chase/wipe direction; optional mirror
-2. **Effects** — chase, rainbow, wipe, pulse, strobe, fire, sparkle, bump, spectrum
-3. **Scenes** — snapshot the current look and recall with a fade
-4. **Solo** — highlight one group while dimming the rest
-5. **Tempo** — tap tempo / BPM slider; beat-synced effects follow it
+### Groups
+
+Create ordered lists in the **Groups** tab (left→right for chase/wipe). Optional
+**mirror** averages the look from both ends so the stage reads symmetric.
+
+```json
+"groups": [
+  { "name": "Front Wash", "fixtures": ["P1", "P2", "P3"], "mirror": false }
+]
+```
+
+### Effects
+
+Pick a target group, then toggle: chase, rainbow, wipe, pulse, strobe, fire,
+sparkle, bump, spectrum. Intensity/speed follow the BPM clock when sync is on.
+
+| Effect | What it does |
+|--------|----------------|
+| Chase | A comet travels across the group |
+| Rainbow | Hue cycle across fixtures / time |
+| Wipe | Colour sweep left→right |
+| Pulse | Sine breathe on dimmer/colour |
+| Strobe | Rate-controlled flash (beat-sync optional) |
+| Fire | Warm random flicker |
+| Sparkle | Random twinkles over the base |
+| Bump | Flash on each beat |
+| Spectrum | Bar segments follow FFT bands (needs kick audio input) |
+
+Webhooks: `/hook/effect_chase_toggle`, `/hook/effect-clear`, etc.
+
+### Scenes / moments
+
+**Snapshot Current Look** stores fixture colours with a fade time. Recall from
+the Scenes tab, MIDI, or `/hook/scene_recall?scene=Warm%20Wash`.
+
+### Solo, blackout, tempo
+
+- **Solo** dims everything except one group
+- **Blackout** / **Fade Out** / **Restore** in the sidebar and companion strip
+- **Tap Tempo** or the BPM slider; effects read this clock
+
+### Palettes
+
+`palettes` in `config.json` are named RGB lists (e.g. Worship Warm, Cool Night)
+so looks stay intentional. Edit in `config.example.json` / `config.json`.
 
 Spectrum analyzer uses the same audio input as kick strobe (FFT bands).
+
+---
+
+## Compact companion (beside ProPresenter)
+
+`python app.py` launches `companion.py` automatically: a narrow always-on-top
+window with status and Start / Stop / Pause / Fog / Kick / Clear Effects /
+Blackout / Restore. Use the full browser only for zones, MIDI learn, and config.
 
 ---
 
@@ -377,13 +435,15 @@ The **MIDI** tab maps any note or CC to the same action registry as webhooks.
 ### Windows (no extra MIDI packages)
 
 MIDI uses the built-in Windows `winmm` API — **do not install pygame or python-rtmidi**.
+The app opens MIDI on start and retries until the controller appears.
 
 ```bash
 pip install -r requirements.txt
 python app.py
 ```
 
-Then: **MIDI** tab → Refresh → select controller → Connect → Learn.
+First time: **MIDI** tab → Learn. After that, device + mappings persist in
+`config.json` and reconnect automatically.
 
 ### Other platforms
 
@@ -397,10 +457,9 @@ pip install pygame
 
 ### Use
 
-1. Plug in your MIDI controller  
-2. Open the **MIDI** tab → **Refresh** → select the device → **Connect**  
-3. Click **Learn** next to an action, then press a pad or move a knob  
-4. Mappings save into `config.json` under `midi.mappings`  
+1. Plug in your MIDI controller (the app keeps retrying if it is late)  
+2. Open the **MIDI** tab if you need to Learn new maps  
+3. Mappings save into `config.json` under `midi.mappings`  
 
 Faders use soft takeover so connecting a controller won't jump levels.
 

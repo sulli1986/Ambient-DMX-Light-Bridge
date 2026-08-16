@@ -45,6 +45,8 @@ class MidiController:
         self._pickup: dict[str, float] = {}
         self._pickup_armed: dict[str, bool] = {}
         self._use_winmm = False
+        self.wanted = False  # True = keep trying to open MIDI
+        self._watchdog = None
 
     @staticmethod
     def _winmm_available() -> bool:
@@ -105,8 +107,41 @@ class MidiController:
                 errors.append(f"{backend}: {e}")
         raise RuntimeError(" | ".join(errors) if errors else "No mido backend")
 
-    def start(self, device_name: str | None = None):
-        self.stop()
+    def start_watchdog(self):
+        """Keep MIDI open across app restarts and late-plugged controllers."""
+        self.wanted = True
+        if self._watchdog and self._watchdog.is_alive():
+            return
+        self._watchdog = threading.Thread(target=self._watch, daemon=True)
+        self._watchdog.start()
+
+    def _watch(self):
+        # First attempt immediately, then retry while wanted but disconnected
+        delay = 1.0
+        while True:
+            if self.wanted and not self.active:
+                cfg = self.get_config().get("midi", {})
+                ok = self.start(cfg.get("device", ""), from_watchdog=True)
+                if ok:
+                    midi = self.get_config().setdefault("midi", {})
+                    midi["enabled"] = True
+                    if self.port_name:
+                        midi["device"] = self.port_name
+                    try:
+                        self.save_mappings(self.get_config())
+                    except Exception:
+                        pass
+                    delay = 3.0
+                else:
+                    delay = min(15.0, delay + 1.0)
+            time.sleep(delay)
+
+    def start(self, device_name: str | None = None, from_watchdog: bool = False):
+        if not from_watchdog:
+            self.wanted = True
+        if self.active:
+            return True
+        self.stop(forget_wanted=False)
         self.error = None
         cfg = self.get_config().get("midi", {})
         name = device_name if device_name is not None else cfg.get("device", "")
@@ -177,15 +212,14 @@ class MidiController:
             self.port = None
             return False
 
-    def stop(self):
+    def stop(self, forget_wanted: bool = True):
+        if forget_wanted:
+            self.wanted = False
         self.active = False
         self._stop.set()
         if self.port:
             try:
-                if self._use_winmm:
-                    self.port.close()
-                else:
-                    self.port.close()
+                self.port.close()
             except Exception:
                 pass
             self.port = None
@@ -225,6 +259,7 @@ class MidiController:
             "last_event": self.last_event,
             "mappings": cfg.get("mappings", []),
             "backend": self.backend or ("winmm" if self._winmm_available() else _backend_name),
+            "wanted": self.wanted,
         }
 
     def _msg_key(self, msg) -> dict | None:

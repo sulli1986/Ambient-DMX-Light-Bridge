@@ -885,8 +885,9 @@
         <div class="panel-body">
 
           <div style="font-size:12px;color:var(--muted);margin-bottom:16px;line-height:1.6">
-            Flashes all fixtures with the current screen primary colour on every
-            kick drum hit (boosted full-bright, same hue as the background). Feed the kick mic to this machine
+            Flashes the <b>bottom</b> fixtures with the current screen colour on every
+            kick drum hit (boosted full-bright). Effects also snap their beat to the kick.
+            Feed the kick mic to this machine
             on an audio input channel — e.g. patch it to a Dante Virtual Soundcard channel from
             the console — then pick the device and channel below. Set the threshold so the red
             marker sits above the bleed but below the kick peaks on the live meter.
@@ -976,6 +977,7 @@
           <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
             Map any MIDI note or CC to the same actions as webhooks. Click <strong>Learn</strong>, then move a control on your device.
             On Windows, MIDI uses the built-in system driver — no pygame or python-rtmidi install needed.
+            The app opens MIDI automatically on start and keeps retrying until your controller is plugged in.
           </div>
           <div class="field-row">
             <div class="field"><label>MIDI Input</label>
@@ -1396,6 +1398,7 @@ async function saveConfig(silent = false) {
     gain: parseInt(document.getElementById('kick-gain').value) || 1,
     flash_ms: parseInt(document.getElementById('kick-flash-ms').value) || 60,
     debounce_ms: parseInt(document.getElementById('kick-debounce').value) || 150,
+    target: (config.kick_strobe && config.kick_strobe.target) || 'bottom',
   };
   config.tempo = config.tempo || {};
   config.tempo.bpm = parseFloat(document.getElementById('bpm_slider')?.value) || config.tempo.bpm || 120;
@@ -2155,7 +2158,8 @@ async function setSolo(v) {
 // ---- EFFECTS ----
 const EFFECT_LABELS = {
   chase: 'Color Chase', rainbow: 'Rainbow', wipe: 'Wipe', pulse: 'Pulse',
-  strobe: 'Strobe', fire: 'Fire', sparkle: 'Sparkle', bump: 'Bump', spectrum: 'Spectrum'
+  strobe: 'Strobe', fire: 'Fire', sparkle: 'Sparkle', bump: 'Bump',
+  spectrum: 'Spectrum', alternate: 'Alternate', bounce: 'Bounce'
 };
 function renderEffectButtons() {
   const el = document.getElementById('effect-buttons');
@@ -2347,8 +2351,16 @@ function updateMidiUI(s) {
 
   const st = document.getElementById('midi-status');
   if (st) {
-    st.textContent = s.active ? ('Connected: ' + (s.device || '')) : (s.error || 'Disconnected');
-    st.style.color = s.active ? 'var(--green)' : 'var(--muted)';
+    if (s.active) {
+      st.textContent = 'Connected: ' + (s.device || '');
+      st.style.color = 'var(--green)';
+    } else if (s.wanted) {
+      st.textContent = s.error ? ('Waiting for controller — ' + s.error) : 'Waiting for MIDI controller…';
+      st.style.color = 'var(--amber)';
+    } else {
+      st.textContent = s.error || 'Disconnected';
+      st.style.color = 'var(--muted)';
+    }
   }
   const last = document.getElementById('midi-last');
   if (last && s.last_event) {

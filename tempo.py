@@ -14,6 +14,7 @@ class TempoClock:
         self._taps: deque[float] = deque(maxlen=8)
         self._beat_count = 0
         self._last_beat_idx = -1
+        self.last_kick_t = 0.0
 
     def set_bpm(self, bpm: float):
         bpm = max(40.0, min(240.0, float(bpm)))
@@ -42,6 +43,22 @@ class TempoClock:
                 self._anchor_t = now
                 self._phase_offset = 0.0
         return self.bpm
+
+    def kick(self) -> float:
+        """Treat a kick drum hit as a downbeat — updates BPM and snaps phase."""
+        now = time.monotonic()
+        self.last_kick_t = now
+        bpm = self.tap()
+        self._anchor_t = now
+        self._phase_offset = 0.0
+        return bpm
+
+    def kick_age(self, now: float | None = None) -> float:
+        """Seconds since last kick (large if never)."""
+        now = time.monotonic() if now is None else now
+        if self.last_kick_t <= 0:
+            return 999.0
+        return now - self.last_kick_t
 
     def beat_phase(self, now: float | None = None) -> float:
         """Fractional beat position [0, 1)."""

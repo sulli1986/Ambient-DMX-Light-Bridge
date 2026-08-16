@@ -21,7 +21,7 @@ from pathlib import Path
 from flask import Flask, render_template, request, jsonify
 
 from tempo import TempoClock
-from effects import EffectEngine, EFFECT_DEFS
+from effects import EffectEngine, EFFECT_DEFS, resolve_group_fixtures
 from actions import build_actions
 from midi_control import MidiController
 
@@ -65,7 +65,8 @@ DEFAULT_CONFIG = {
         "threshold": 0.5,    # peak level (0-1) that counts as a hit
         "gain": 1.0,         # input boost (×) applied before the meter/trigger
         "debounce_ms": 150,  # minimum gap between hits
-        "flash_ms": 60       # how long fixtures hold the flash
+        "flash_ms": 60,      # how long fixtures hold the flash
+        "target": "bottom"   # all | bottom | group name
     }
 }
 
@@ -680,8 +681,20 @@ class BridgeEngine:
 
     def init_actions(self):
         self.actions = build_actions(self, self.effects, self.tempo, self.midi)
-        if self.config.get("midi", {}).get("enabled"):
-            self.midi.start(self.config.get("midi", {}).get("device", ""))
+        self.ensure_midi()
+
+    def ensure_midi(self):
+        """Open MIDI on launch and keep retrying until the controller appears."""
+        midi = self.config.setdefault("midi", {})
+        should = bool(
+            midi.get("enabled")
+            or midi.get("device")
+            or midi.get("mappings")
+        )
+        # Always watch on Windows so a controller plugged in later is picked up
+        if should or self.midi._winmm_available():
+            self.midi.start_watchdog()
+            log.info("MIDI auto-connect armed")
 
     def _midi_action(self, action_id, value=None, **kwargs):
         if not self.actions:
@@ -751,15 +764,16 @@ class BridgeEngine:
         if self.kick_enabled:
             self.set_kick_strobe(True)
         midi_cfg = cfg.get("midi", {})
-        if midi_cfg.get("enabled"):
-            # Only (re)start if not already on the same device
-            want = midi_cfg.get("device", "")
-            if not (self.midi.active and self.midi.port_name and
-                    (not want or want.lower() in (self.midi.port_name or "").lower())):
-                self.midi.start(want)
+        if midi_cfg.get("enabled") is False and not midi_cfg.get("mappings"):
+            self.midi.stop()
         else:
+            want = midi_cfg.get("device", "")
             if self.midi.active:
-                self.midi.stop()
+                pass
+            else:
+                self.midi.start_watchdog()
+                if want or midi_cfg.get("enabled"):
+                    self.midi.start(want)
 
     def start(self):
         if self.running:
@@ -861,15 +875,37 @@ class BridgeEngine:
             min(255, int(b * scale)),
         )
 
+    def _fixture_is_bottom(self, fx: dict) -> bool:
+        zone = fx.get("zone") or {}
+        y1 = float(zone.get("y1", 0.0))
+        y2 = float(zone.get("y2", 1.0))
+        return ((y1 + y2) / 2.0) >= 0.55
+
+    def _kick_flash_fixtures(self):
+        target = (self.config.get("kick_strobe") or {}).get("target", "bottom")
+        all_fx = self._get_all_fixtures()
+        if not target or target in ("all", "*"):
+            return all_fx
+        if target == "bottom":
+            bottom = [fx for fx in all_fx if self._fixture_is_bottom(fx)]
+            return bottom or all_fx
+        names = set(resolve_group_fixtures(self.config, target))
+        matched = [fx for fx in all_fx if fx["name"] in names]
+        return matched or all_fx
+
     def _on_kick(self):
         """Fired per kick hit (from the detector's dispatch thread):
-        flash all fixtures with the current screen primary colour immediately,
-        then let ambient colours resume after flash_ms."""
+        snap effect tempo to the kick, flash bottom fixtures with screen colour."""
         if not (self.running and self.enabled and self.kick_enabled and self.osc):
             return
+        try:
+            bpm = self.tempo.kick()
+            self.config.setdefault("tempo", {})["bpm"] = bpm
+        except Exception:
+            pass
         flash_ms = self.config.get("kick_strobe", {}).get("flash_ms", 60)
         self.flash_until = time.time() + flash_ms / 1000.0
-        for fx in self._get_all_fixtures():
+        for fx in self._kick_flash_fixtures():
             r, g, b = self._flash_colour_for(fx["name"])
             self.osc.send_fixture(
                 fx["name"], rgb_to_channels(r, g, b, fx["type"])
